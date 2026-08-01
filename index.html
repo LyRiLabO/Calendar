@@ -26,14 +26,17 @@
     --blush:#C77B6C;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  /* 整個介面預設不能被框選文字、雙擊也不會觸發縮放，
-     這是像手機 App 一樣操作的關鍵：手指誤觸不會選到文字或放大畫面。
+  /* 整個介面預設不能被框選文字，這是像手機 App 一樣操作的關鍵：
+     手指誤觸不會選到文字。雙擊/雙指縮放已經靠 viewport 的
+     user-scalable=no 擋掉了，這裡刻意不再疊加 touch-action:manipulation——
+     那樣會讓瀏覽器提早搶走垂直滑動的判斷權，害長按拖曳（移動行程、
+     空白處拉框建立行程）的 400ms 判斷來不及生效，整個被當成頁面捲動。
      真正需要輸入文字的欄位（文字框、日期、時間、數字、多行備註）
      則保留正常的選取/游標行為，不然沒辦法編輯內容。 */
   html, body{
     -webkit-user-select:none; user-select:none;
     -webkit-touch-callout:none;
-    touch-action:manipulation;
+    overscroll-behavior:none;
   }
   input, textarea{
     -webkit-user-select:text; user-select:text;
@@ -169,11 +172,13 @@
     -webkit-overflow-scrolling:touch;
     position:relative;
     touch-action:pan-y;
+    overscroll-behavior:contain;
   }
   .timeline-grid{
     position:relative;
     height:1200px; /* 24 * 50px */
     margin:0 16px 0 0;
+    touch-action:none;
   }
   .margin-rule{
     position:absolute;
@@ -236,6 +241,7 @@
     position:absolute;
     left:0; right:0;
     min-height:8px;
+    touch-action:none;
     background:var(--card);
     border-radius:8px;
     border-left:4px solid var(--gold);
@@ -1148,14 +1154,14 @@
     let dragging = false;
     let cancelledByScroll = false;
     let startY = 0;
+    let lastY = 0;
     let origTop = 0;
-    let startScrollTop = 0;
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
       startY = e.clientY;
+      lastY = e.clientY;
       origTop = parseFloat(card.style.top) || 0;
-      startScrollTop = timelineScroll.scrollTop;
       dragging = false;
       cancelledByScroll = false;
 
@@ -1178,21 +1184,25 @@
 
       const onMove = function(ev2){
         const dy = ev2.clientY - startY;
-        // 手指的自然抖動在觸控螢幕上很常見，光靠像素位移很容易把單純點擊
-        // 誤判成捲動。改用「頁面是否真的捲動」當主要依據，位移量放寬到 16px
-        // 只當輔助判斷，避免誤殺一般點擊。
-        const realScrolled = Math.abs(timelineScroll.scrollTop - startScrollTop) > 2;
-        if(!dragging && (realScrolled || Math.abs(dy) > 16)){
-          cancelledByScroll = true;
-          clearTimeout(longPressTimer);
-          return; // 視為頁面捲動，交還瀏覽器處理
+        if(!dragging){
+          // 卡片本身是 touch-action:none，瀏覽器不會自動幫忙捲動頁面，
+          // 所以一旦判定使用者其實是想捲動（而不是要長按拖曳），要自己
+          // 動手把 scrollTop 往回推，才會有正常的捲動手感；未達門檻前
+          // （手指還沒移動超過 16px）完全不動，讓長按判斷保有優先權。
+          if(!cancelledByScroll && Math.abs(dy) > 16){
+            cancelledByScroll = true;
+            clearTimeout(longPressTimer);
+          }
+          if(cancelledByScroll){
+            timelineScroll.scrollTop -= (ev2.clientY - lastY);
+          }
+          lastY = ev2.clientY;
+          return;
         }
-        if(dragging){
-          ev2.preventDefault();
-          let newTop = origTop + dy;
-          newTop = Math.max(0, Math.min(newTop, 1200 - card.offsetHeight));
-          siblingCards().forEach(c => c.style.top = newTop+'px');
-        }
+        ev2.preventDefault();
+        let newTop = origTop + dy;
+        newTop = Math.max(0, Math.min(newTop, 1200 - card.offsetHeight));
+        siblingCards().forEach(c => c.style.top = newTop+'px');
       };
 
       const onUp = function(ev2){
@@ -1358,7 +1368,7 @@
   }
 
   (function(){
-    let downY = 0, downX = 0, downTime = 0, anchorPx = 0, anchorColIdx = 0;
+    let downY = 0, downX = 0, downTime = 0, lastY = 0, anchorPx = 0, anchorColIdx = 0;
     let longPressTimer = null;
     let selecting = false;
     let cancelled = false;
@@ -1375,13 +1385,20 @@
       const curPx = e.clientY - rect.top;
 
       if(!selecting){
+        // timeline-grid 是 touch-action:none，瀏覽器不會自動幫忙捲動，
+        // 所以一旦判定使用者其實是想捲動／左右滑動換日（而不是要長按
+        // 拉框），要自己動手把 scrollTop 往回推，才會有正常的捲動手感。
         // 上下移動視為捲動；左右移動幅度較大則視為「切換日期」的滑動手勢，
         // 兩者都不該被誤判成長按進入選取模式，所以都要取消計時器。
-        if(Math.abs(e.clientY - downY) > 8 || Math.abs(e.clientX - downX) > 15){
+        if(!cancelled && (Math.abs(e.clientY - downY) > 8 || Math.abs(e.clientX - downX) > 15)){
           cancelled = true;
           clearTimeout(longPressTimer);
         }
-        return; // 長按尚未觸發前，讓瀏覽器正常捲動 / 滑動
+        if(cancelled){
+          timelineScroll.scrollTop -= (e.clientY - lastY);
+        }
+        lastY = e.clientY;
+        return;
       }
       e.preventDefault();
       let top = Math.min(anchorPx, curPx);
@@ -1431,6 +1448,7 @@
       // 只處理空白區域（行程卡自己的 pointerdown 會 stopPropagation）
       downY = e.clientY;
       downX = e.clientX;
+      lastY = e.clientY;
       downTime = Date.now();
       cancelled = false;
       selecting = false;
