@@ -1110,7 +1110,7 @@
             '<div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
         }
 
-        attachCardInteractions(card, inst);
+        attachCardInteractions(card, inst, runMin, runMax);
         const handle = document.createElement('span');
         handle.className = 'resize-handle';
         handle.setAttribute('aria-hidden', 'true');
@@ -1149,19 +1149,25 @@
   }
 
   /* ---------------- 長按拖拽（防誤觸） ---------------- */
-  function attachCardInteractions(card, inst){
+  function attachCardInteractions(card, inst, runMin, runMax){
     let longPressTimer = null;
     let dragging = false;
     let cancelledByScroll = false;
+    let startX = 0;
     let startY = 0;
     let lastY = 0;
     let origTop = 0;
+    let pendingRunMin = runMin;
+    let pendingRunMax = runMax;
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
+      startX = e.clientX;
       startY = e.clientY;
       lastY = e.clientY;
       origTop = parseFloat(card.style.top) || 0;
+      pendingRunMin = runMin;
+      pendingRunMax = runMax;
       dragging = false;
       cancelledByScroll = false;
 
@@ -1176,7 +1182,8 @@
 
       function siblingCards(){
         // 同一行程如果橫跨不相鄰的欄位,會拆成好幾張獨立卡片顯示,
-        // 拖曳其中一張調整時間時,其餘分段要一起跟著移動。
+        // 拖曳其中一張調整時間時,其餘分段要一起跟著移動（只有時間會同步，
+        // 橫向欄位只會影響正在拖曳的這一段）。
         return Array.from(eventsLayer.querySelectorAll(
           '.event-card[data-master-id="'+inst.masterId+'"][data-date="'+inst.instanceDate+'"]'
         ));
@@ -1200,9 +1207,27 @@
           return;
         }
         ev2.preventDefault();
+
+        // 上下：改變時間，其餘分段（若有）一起同步移動
         let newTop = origTop + dy;
         newTop = Math.max(0, Math.min(newTop, 1200 - card.offsetHeight));
         siblingCards().forEach(c => c.style.top = newTop+'px');
+
+        // 左右：把這一段整塊移到別的欄位範圍（寬度不變，只是整塊平移），
+        // 用來實現「拖到另一位共編者的欄位」。
+        const rect = eventsLayer.getBoundingClientRect();
+        const n = Math.max(1, columns.length);
+        const colWidthPx = rect.width / n;
+        const dx = ev2.clientX - startX;
+        const span = runMax - runMin;
+        let newRunMin = runMin + Math.round(dx / colWidthPx);
+        newRunMin = Math.max(0, Math.min(n - 1 - span, newRunMin));
+        pendingRunMin = newRunMin;
+        pendingRunMax = newRunMin + span;
+        const leftPct = (pendingRunMin/n*100);
+        const widthPct = ((span+1)/n*100);
+        card.style.left = 'calc(' + leftPct + '% + 3px)';
+        card.style.width = 'calc(' + widthPct + '% - 6px)';
       };
 
       const onUp = function(ev2){
@@ -1219,7 +1244,17 @@
           const snappedStartMin = Math.round(rawStartMin/15)*15;
           const durationMin = timeToMinutes(inst.end) - timeToMinutes(inst.start);
           const newStartMin = Math.max(0, Math.min(23*60, snappedStartMin));
-          quickSetTime(inst.masterId, inst.instanceDate, minutesToTime(newStartMin), minutesToTime(newStartMin + durationMin));
+          const newStart = minutesToTime(newStartMin);
+          const newEnd = minutesToTime(newStartMin + durationMin);
+
+          // 把這一段原本涵蓋的欄位，換成拖曳後的新範圍
+          const origIds = columns.slice(runMin, runMax+1).map(c=>c.id);
+          const newIds = columns.slice(pendingRunMin, pendingRunMax+1).map(c=>c.id);
+          const pset = new Set(inst.participants||[]);
+          origIds.forEach(id => { if(newIds.indexOf(id)===-1) pset.delete(id); });
+          newIds.forEach(id => pset.add(id));
+
+          quickSetTimeAndParticipants(inst.masterId, inst.instanceDate, newStart, newEnd, Array.from(pset));
           renderEvents();
         } else if(!cancelledByScroll){
           openEdit(inst.masterId, inst.instanceDate);
