@@ -311,6 +311,20 @@
     transform:scale(1.7);
   }
 
+  /* 長按拖曳行程時的浮動卡片：脫離欄位的百分比定位系統，直接用
+     position:fixed 跟著手指座標走，可以自由跨欄、跨日移動，
+     不會被卡在固定的欄位位置上。 */
+  .card-ghost{
+    position:fixed !important;
+    right:auto !important;
+    z-index:999;
+    pointer-events:none;
+    box-shadow:0 14px 30px rgba(32,38,58,0.38);
+    transform:scale(1.06);
+    opacity:0.97;
+  }
+  .card-ghost .resize-handle{ display:none; }
+
   /* 時長 < 45 分鐘：高度放不下兩行，標題與時間改成同一行並排 */
   .event-card.compact{
     display:flex;
@@ -1107,6 +1121,9 @@
       return;
     }
     insts.forEach(inst => {
+      if(floatingDrag && floatingDrag.masterId === inst.masterId && floatingDrag.homeDate === inst.instanceDate){
+        return; // 這個行程正在被浮動拖曳中，本尊先不畫，只顯示浮動的 ghost
+      }
       const startMin = timeToMinutes(inst.start);
       const endMin = timeToMinutes(inst.end);
       const top = startMin/60*50;
@@ -1344,6 +1361,111 @@
     }, 300);
   }
 
+  /* ---------------- 浮動拖曳（可連續跨欄、跨日移動） ----------------
+     長按行程卡片後，卡片會變成一個跟著手指座標走的浮動分身（ghost），
+     不再受欄位百分比定位的限制；拖到畫面邊緣停留著不放，會連續不斷地
+     翻到下一天/上一天，直到手指離開邊緣或放開為止；放開的當下，才依
+     ghost 最後停留的位置換算出最終的時間／欄位／日期並真正寫入資料。 */
+  let floatingDrag = null; // {masterId, homeDate, ghost, w, h, span, durationMin, lastEdgeDir}
+  let edgeFlipTimer = null;
+
+  function positionGhost(clientX, clientY){
+    if(!floatingDrag) return;
+    floatingDrag.ghost.style.left = (clientX - floatingDrag.w/2) + 'px';
+    floatingDrag.ghost.style.top = (clientY - floatingDrag.h/2) + 'px';
+  }
+
+  function flipDayInstant(direction){
+    animateCommitDaySlide(direction, function(){});
+  }
+
+  function armEdgeFlip(direction){
+    if(edgeFlipTimer) return;
+    edgeFlipTimer = setTimeout(function(){
+      edgeFlipTimer = null;
+      flipDayInstant(direction);
+      // 手指還停在邊緣的話，繼續連續翻下一天，不用放開再重來
+      if(floatingDrag && floatingDrag.lastEdgeDir === direction){
+        armEdgeFlip(direction);
+      }
+    }, 500);
+  }
+  function disarmEdgeFlip(){
+    if(edgeFlipTimer){ clearTimeout(edgeFlipTimer); edgeFlipTimer = null; }
+  }
+
+  function startFloatingDrag(inst, runMin, runMax, sourceCard, clientX, clientY){
+    const rect = sourceCard.getBoundingClientRect();
+    const ghost = sourceCard.cloneNode(true);
+    ghost.removeAttribute('id');
+    ghost.classList.remove('dragging', 'resizing');
+    ghost.classList.add('card-ghost');
+    ghost.style.width = rect.width + 'px';
+    ghost.style.height = rect.height + 'px';
+    document.body.appendChild(ghost);
+
+    floatingDrag = {
+      masterId: inst.masterId,
+      homeDate: inst.instanceDate,
+      ghost: ghost,
+      w: rect.width,
+      h: rect.height,
+      span: runMax - runMin,
+      durationMin: timeToMinutes(inst.end) - timeToMinutes(inst.start),
+      lastEdgeDir: null
+    };
+    positionGhost(clientX, clientY);
+    renderEvents(); // 立刻重繪一次：本尊卡片先隱藏，畫面上只剩浮動的 ghost
+  }
+
+  function updateFloatingDrag(clientX, clientY){
+    if(!floatingDrag) return;
+    positionGhost(clientX, clientY);
+
+    const rect = eventsLayer.getBoundingClientRect();
+    const nearLeft = clientX - rect.left < 34;
+    const nearRight = rect.right - clientX < 34;
+    if(nearLeft || nearRight){
+      const dir = nearRight ? 'next' : 'prev';
+      if(floatingDrag.lastEdgeDir !== dir){
+        floatingDrag.lastEdgeDir = dir;
+        disarmEdgeFlip();
+        armEdgeFlip(dir);
+      }
+    } else if(floatingDrag.lastEdgeDir){
+      floatingDrag.lastEdgeDir = null;
+      disarmEdgeFlip();
+    }
+  }
+
+  function endFloatingDrag(clientX, clientY){
+    if(!floatingDrag) return;
+    disarmEdgeFlip();
+    const fd = floatingDrag;
+    fd.ghost.remove();
+    floatingDrag = null;
+
+    // 用放開當下 ghost 的中心點，換算成「目前這一天」的時間與欄位
+    const gridRect = timelineGrid.getBoundingClientRect();
+    const rawMin = Math.round((clientY - gridRect.top)/50*60);
+    const snappedStart = Math.max(0, Math.min(23*60, Math.round(rawMin/15)*15));
+    const newStart = minutesToTime(snappedStart);
+    const newEnd = minutesToTime(snappedStart + fd.durationMin);
+
+    const evRect = eventsLayer.getBoundingClientRect();
+    const n = Math.max(1, columns.length);
+    const colWidthPx = evRect.width / n || 1;
+    let colIdx = Math.floor((clientX - evRect.left) / colWidthPx);
+    colIdx = Math.max(0, Math.min(n - 1 - fd.span, colIdx));
+    const newParticipants = columns.slice(colIdx, colIdx + fd.span + 1).map(c => c.id);
+
+    quickSetTimeAndParticipants(fd.masterId, fd.homeDate, newStart, newEnd, newParticipants);
+    if(fd.homeDate !== currentDate){
+      moveInstanceToDate(fd.masterId, fd.homeDate, currentDate);
+    }
+    renderEvents();
+  }
+
   /* ---------------- 長按拖拽（防誤觸） ---------------- */
   function attachCardInteractions(card, inst, runMin, runMax){
     let longPressTimer = null;
@@ -1352,75 +1474,21 @@
     let startX = 0;
     let startY = 0;
     let lastY = 0;
-    let origTop = 0;
-    let pendingRunMin = runMin;
-    let pendingRunMax = runMax;
-    let edgeHoldTimer = null;
-    let edgeTriggered = false;
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
       startX = e.clientX;
       startY = e.clientY;
       lastY = e.clientY;
-      origTop = parseFloat(card.style.top) || 0;
-      pendingRunMin = runMin;
-      pendingRunMax = runMax;
       dragging = false;
       cancelledByScroll = false;
-      edgeTriggered = false;
 
       longPressTimer = setTimeout(function(){
         if(cancelledByScroll) return;
         dragging = true;
-        siblingCards().forEach(c => c.classList.add('dragging'));
-        card.style.touchAction = 'none';
-        try{ card.setPointerCapture(e.pointerId); }catch(err){}
         if(navigator.vibrate) navigator.vibrate(15);
+        startFloatingDrag(inst, runMin, runMax, card, e.clientX, e.clientY);
       }, 400);
-
-      function siblingCards(){
-        // 同一行程如果橫跨不相鄰的欄位,會拆成好幾張獨立卡片顯示,
-        // 拖曳其中一張調整時間時,其餘分段要一起跟著移動（只有時間會同步，
-        // 橫向欄位只會影響正在拖曳的這一段）。
-        return Array.from(eventsLayer.querySelectorAll(
-          '.event-card[data-master-id="'+inst.masterId+'"][data-date="'+inst.instanceDate+'"]'
-        ));
-      }
-
-      // 拖曳中把行程「放到」目前位置對應的時間／欄位，並搬到 targetDate。
-      // 用在「拖到畫面邊緣、觸發跨日切換」的時候：碰到邊緣停留夠久，就
-      // 直接視為使用者要把這個行程丟到隔壁那一天，跟放開手指一樣去
-      // 完成一次落定，只是額外多了「換到新的一天」這個步驟。
-      function commitToAdjacentDay(direction){
-        clearTimeout(longPressTimer);
-        clearTimeout(edgeHoldTimer);
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        document.removeEventListener('pointercancel', onUp);
-        siblingCards().forEach(c => c.classList.remove('dragging'));
-        card.style.touchAction = '';
-
-        const rawTop = parseFloat(card.style.top);
-        const snappedStartMin = Math.round(Math.round(rawTop/50*60)/15)*15;
-        const durationMin = timeToMinutes(inst.end) - timeToMinutes(inst.start);
-        const newStartMin = Math.max(0, Math.min(23*60, snappedStartMin));
-        const newStart = minutesToTime(newStartMin);
-        const newEnd = minutesToTime(newStartMin + durationMin);
-        const origIds = columns.slice(runMin, runMax+1).map(c=>c.id);
-        const newIds = columns.slice(pendingRunMin, pendingRunMax+1).map(c=>c.id);
-        const pset = new Set(inst.participants||[]);
-        origIds.forEach(id => { if(newIds.indexOf(id)===-1) pset.delete(id); });
-        newIds.forEach(id => pset.add(id));
-        quickSetTimeAndParticipants(inst.masterId, inst.instanceDate, newStart, newEnd, Array.from(pset));
-
-        const masterId = inst.masterId, instanceDate = inst.instanceDate;
-        const targetDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
-        animateCommitDaySlide(direction, function(){
-          moveInstanceToDate(masterId, instanceDate, targetDate);
-          renderEvents();
-        });
-      }
 
       const onMove = function(ev2){
         const dy = ev2.clientY - startY;
@@ -1440,75 +1508,17 @@
           return;
         }
         ev2.preventDefault();
-
-        // 上下：改變時間，其餘分段（若有）一起同步移動
-        let newTop = origTop + dy;
-        newTop = Math.max(0, Math.min(newTop, 1200 - card.offsetHeight));
-        siblingCards().forEach(c => c.style.top = newTop+'px');
-
-        // 左右：把這一段整塊移到別的欄位範圍（寬度不變，只是整塊平移），
-        // 用來實現「拖到另一位共編者的欄位」。
-        const rect = eventsLayer.getBoundingClientRect();
-        const n = Math.max(1, columns.length);
-        const colWidthPx = rect.width / n;
-        const dx = ev2.clientX - startX;
-        const span = runMax - runMin;
-        let newRunMin = runMin + Math.round(dx / colWidthPx);
-        newRunMin = Math.max(0, Math.min(n - 1 - span, newRunMin));
-        pendingRunMin = newRunMin;
-        pendingRunMax = newRunMin + span;
-        const leftPct = (pendingRunMin/n*100);
-        const widthPct = ((span+1)/n*100);
-        card.style.left = 'calc(' + leftPct + '% + 3px)';
-        card.style.width = 'calc(' + widthPct + '% - 6px)';
-
-        // 拖到畫面最左/右邊緣附近，停留一下就自動觸發切換到前/後一天
-        // （跟編輯手機主畫面拖動 App 圖示到邊緣會自動翻頁是同樣的操作方式）。
-        if(!edgeTriggered){
-          const nearLeft = ev2.clientX - rect.left < 34;
-          const nearRight = rect.right - ev2.clientX < 34;
-          if(nearLeft || nearRight){
-            if(!edgeHoldTimer){
-              const direction = nearRight ? 'next' : 'prev';
-              edgeHoldTimer = setTimeout(function(){
-                edgeTriggered = true;
-                commitToAdjacentDay(direction);
-              }, 550);
-            }
-          } else if(edgeHoldTimer){
-            clearTimeout(edgeHoldTimer);
-            edgeHoldTimer = null;
-          }
-        }
+        updateFloatingDrag(ev2.clientX, ev2.clientY);
       };
 
       const onUp = function(ev2){
         clearTimeout(longPressTimer);
-        clearTimeout(edgeHoldTimer);
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.removeEventListener('pointercancel', onUp);
 
         if(dragging){
-          siblingCards().forEach(c => c.classList.remove('dragging'));
-          card.style.touchAction = '';
-          const rawTop = parseFloat(card.style.top);
-          const rawStartMin = rawTop/50*60;
-          const snappedStartMin = Math.round(rawStartMin/15)*15;
-          const durationMin = timeToMinutes(inst.end) - timeToMinutes(inst.start);
-          const newStartMin = Math.max(0, Math.min(23*60, snappedStartMin));
-          const newStart = minutesToTime(newStartMin);
-          const newEnd = minutesToTime(newStartMin + durationMin);
-
-          // 把這一段原本涵蓋的欄位，換成拖曳後的新範圍
-          const origIds = columns.slice(runMin, runMax+1).map(c=>c.id);
-          const newIds = columns.slice(pendingRunMin, pendingRunMax+1).map(c=>c.id);
-          const pset = new Set(inst.participants||[]);
-          origIds.forEach(id => { if(newIds.indexOf(id)===-1) pset.delete(id); });
-          newIds.forEach(id => pset.add(id));
-
-          quickSetTimeAndParticipants(inst.masterId, inst.instanceDate, newStart, newEnd, Array.from(pset));
-          renderEvents();
+          endFloatingDrag(ev2.clientX, ev2.clientY);
         } else if(!cancelledByScroll){
           openEdit(inst.masterId, inst.instanceDate);
         }
