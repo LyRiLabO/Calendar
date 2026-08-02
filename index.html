@@ -181,6 +181,7 @@
     position:relative;
     touch-action:pan-y;
     overscroll-behavior:contain;
+    padding-bottom:110px; /* 讓接近24:00的時段可以捲離畫面底部，方便觸控 */
   }
   .day-slider{
     position:relative;
@@ -883,7 +884,7 @@
 
       <div class="field">
         <span class="field-label">詳細備註</span>
-        <textarea id="fieldNotes" rows="5"></textarea>
+        <textarea id="fieldNotes" rows="2"></textarea>
       </div>
 
       <button id="btnDelete" class="delete-btn">刪除此行程</button>
@@ -1233,7 +1234,7 @@
     const dt = new Date(y, m-1, d);
     weekdayLabel.textContent = (y)+'年';
     dateLabel.textContent = m+'月'+d+'日 · '+WEEKDAYS[dt.getDay()];
-    todayBadge.classList.toggle('badge-hidden', currentDate !== todayStr());
+    todayBadge.style.visibility = (currentDate === todayStr()) ? 'visible' : 'hidden';
     if(datePicker.value !== currentDate) datePicker.value = currentDate;
   }
 
