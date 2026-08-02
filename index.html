@@ -1371,8 +1371,8 @@
 
   function positionGhost(clientX, clientY){
     if(!floatingDrag) return;
-    floatingDrag.ghost.style.left = (clientX - floatingDrag.w/2) + 'px';
-    floatingDrag.ghost.style.top = (clientY - floatingDrag.h/2) + 'px';
+    floatingDrag.ghost.style.left = (clientX - floatingDrag.grabOffsetX) + 'px';
+    floatingDrag.ghost.style.top = (clientY - floatingDrag.grabOffsetY) + 'px';
   }
 
   function flipDayInstant(direction){
@@ -1410,6 +1410,11 @@
       ghost: ghost,
       w: rect.width,
       h: rect.height,
+      // 手指抓住卡片時，指尖相對卡片左上角的位置——讓 ghost 全程保持
+      // 手指原本抓的那個點，不要因為置中對齊而跳動；放開時也要用同一套
+      // 偏移量換算回卡片左上角，才會跟畫面上看到的落點位置一致。
+      grabOffsetX: clientX - rect.left,
+      grabOffsetY: clientY - rect.top,
       span: runMax - runMin,
       durationMin: timeToMinutes(inst.end) - timeToMinutes(inst.start),
       lastEdgeDir: null
@@ -1445,9 +1450,13 @@
     fd.ghost.remove();
     floatingDrag = null;
 
-    // 用放開當下 ghost 的中心點，換算成「目前這一天」的時間與欄位
+    // 換算成 ghost 實際的左上角位置（用抓取時記錄的偏移量還原），
+    // 這樣落點才會跟畫面上看到的 ghost 位置完全一致，不會偏移。
+    const ghostLeft = clientX - fd.grabOffsetX;
+    const ghostTop = clientY - fd.grabOffsetY;
+
     const gridRect = timelineGrid.getBoundingClientRect();
-    const rawMin = Math.round((clientY - gridRect.top)/50*60);
+    const rawMin = Math.round((ghostTop - gridRect.top)/50*60);
     const snappedStart = Math.max(0, Math.min(23*60, Math.round(rawMin/15)*15));
     const newStart = minutesToTime(snappedStart);
     const newEnd = minutesToTime(snappedStart + fd.durationMin);
@@ -1455,7 +1464,7 @@
     const evRect = eventsLayer.getBoundingClientRect();
     const n = Math.max(1, columns.length);
     const colWidthPx = evRect.width / n || 1;
-    let colIdx = Math.floor((clientX - evRect.left) / colWidthPx);
+    let colIdx = Math.floor((ghostLeft - evRect.left) / colWidthPx);
     colIdx = Math.max(0, Math.min(n - 1 - fd.span, colIdx));
     const newParticipants = columns.slice(colIdx, colIdx + fd.span + 1).map(c => c.id);
 
