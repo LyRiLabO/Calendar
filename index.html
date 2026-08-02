@@ -286,6 +286,10 @@
   .event-card.c-sage{border-left-color:var(--sage);}
   .event-card.c-dusk{border-left-color:var(--dusk);}
   .event-card.c-blush{border-left-color:var(--blush);}
+  .event-card.c-gold .resize-handle{background:var(--gold);}
+  .event-card.c-sage .resize-handle{background:var(--sage);}
+  .event-card.c-dusk .resize-handle{background:var(--dusk);}
+  .event-card.c-blush .resize-handle{background:var(--blush);}
   .event-card.dragging{
     transform:scale(1.04);
     box-shadow:0 10px 26px var(--shadow);
@@ -297,11 +301,11 @@
   }
   .resize-handle{
     position:absolute;
-    right:-4px; bottom:-4px;
-    width:13px; height:13px;
+    right:-8px; bottom:-8px;
+    width:26px; height:26px;
     border-radius:50%;
     background:var(--ink);
-    border:2px solid var(--paper);
+    border:2.5px solid var(--paper);
     cursor:se-resize;
     touch-action:none;
     z-index:13;
@@ -1483,12 +1487,17 @@
     let startX = 0;
     let startY = 0;
     let lastY = 0;
+    let lastMoveTime = 0;
+    let scrollVelocity = 0;
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
+      stopMomentumScroll(); // 再次觸碰畫面就先停掉還在滑的慣性捲動
       startX = e.clientX;
       startY = e.clientY;
       lastY = e.clientY;
+      lastMoveTime = performance.now();
+      scrollVelocity = 0;
       dragging = false;
       cancelledByScroll = false;
 
@@ -1511,7 +1520,12 @@
             clearTimeout(longPressTimer);
           }
           if(cancelledByScroll){
-            timelineScroll.scrollTop -= (ev2.clientY - lastY);
+            const now = performance.now();
+            const dt = now - lastMoveTime || 16;
+            const deltaY = ev2.clientY - lastY;
+            timelineScroll.scrollTop -= deltaY;
+            scrollVelocity = -deltaY / dt; // 記錄最後的捲動速度，放開時延續當慣性
+            lastMoveTime = now;
           }
           lastY = ev2.clientY;
           return;
@@ -1528,7 +1542,9 @@
 
         if(dragging){
           endFloatingDrag(ev2.clientX, ev2.clientY);
-        } else if(!cancelledByScroll){
+        } else if(cancelledByScroll){
+          startMomentumScroll(scrollVelocity);
+        } else {
           openEdit(inst.masterId, inst.instanceDate);
         }
       };
@@ -1647,6 +1663,37 @@
   const timelineScroll = document.getElementById('timelineScroll');
   let selectionBox = null;
 
+  /* ---------------- 手動接手捲動時的慣性動畫 ----------------
+     卡片跟空白格區域都是 touch-action:none，瀏覽器不會再自動處理捲動，
+     所以判定成「其實是想捲動」的時候，是用 JS 手動即時推動 scrollTop
+     （見下面兩組手勢處理的 cancelledByScroll / gestureMode==='scroll'
+     分支）。手動推動本身沒有慣性，手指一放開就會硬停。這裡額外做一個
+     簡單的慣性模擬：放開的當下用最後量到的速度繼續往同方向捲一小段，
+     並隨時間用摩擦力係數逐漸變慢，直到接近 0 或碰到頂/底邊界為止，
+     感覺就會跟原生捲動一樣有「放手後還會滑一下」的物理感。 */
+  let momentumRAF = null;
+  function stopMomentumScroll(){
+    if(momentumRAF){ cancelAnimationFrame(momentumRAF); momentumRAF = null; }
+  }
+  function startMomentumScroll(velocity){ // velocity: scrollTop 每毫秒的變化量(px/ms)
+    stopMomentumScroll();
+    let v = velocity;
+    let lastT = performance.now();
+    function step(now){
+      const dt = Math.min(32, now - lastT); // 掉幀時限制單幀最大時間差，避免瞬間跳太遠
+      lastT = now;
+      if(Math.abs(v) < 0.02){ momentumRAF = null; return; }
+      const maxScroll = Math.max(0, timelineScroll.scrollHeight - timelineScroll.clientHeight);
+      const next = timelineScroll.scrollTop + v*dt;
+      if(next <= 0){ timelineScroll.scrollTop = 0; momentumRAF = null; return; }
+      if(next >= maxScroll){ timelineScroll.scrollTop = maxScroll; momentumRAF = null; return; }
+      timelineScroll.scrollTop = next;
+      v *= 0.94; // 摩擦力衰減
+      momentumRAF = requestAnimationFrame(step);
+    }
+    momentumRAF = requestAnimationFrame(step);
+  }
+
   function snap25(px){ return Math.round(px/12.5)*12.5; } // 12.5px = 15分鐘（50px/小時 ÷ 4）
 
   function ensureSelectionBox(){
@@ -1684,6 +1731,7 @@
 
   (function(){
     let downY = 0, downX = 0, lastY = 0, anchorPx = 0, anchorColIdx = 0;
+    let lastMoveTime = 0, scrollVelocity = 0;
     let longPressTimer = null;
     let selecting = false;
     let cancelled = false;
@@ -1714,7 +1762,12 @@
           }
         }
         if(gestureMode === 'scroll'){
-          timelineScroll.scrollTop -= (e.clientY - lastY);
+          const now = performance.now();
+          const dt = now - lastMoveTime || 16;
+          const deltaY = e.clientY - lastY;
+          timelineScroll.scrollTop -= deltaY;
+          scrollVelocity = -deltaY / dt; // 記錄最後的捲動速度，放開時延續當慣性
+          lastMoveTime = now;
         } else if(gestureMode === 'swipeday'){
           e.preventDefault();
           updateDaySlide(e.clientX - downX); // 畫面即時跟著手指位移滑動，跟垂直捲動同樣的連貫手感
@@ -1755,6 +1808,8 @@
       } else if(gestureMode === 'swipeday'){
         // 放開手指：滑動幅度夠大就用動畫接續完成切日，不夠就彈回原位
         endDaySlide(e.clientX - downX);
+      } else if(gestureMode === 'scroll'){
+        startMomentumScroll(scrollVelocity);
       }
       selecting = false;
       cancelled = false;
@@ -1763,9 +1818,12 @@
 
     timelineGrid.addEventListener('pointerdown', function(e){
       // 只處理空白區域（行程卡自己的 pointerdown 會 stopPropagation）
+      stopMomentumScroll(); // 再次觸碰畫面就先停掉還在滑的慣性捲動
       downY = e.clientY;
       downX = e.clientX;
       lastY = e.clientY;
+      lastMoveTime = performance.now();
+      scrollVelocity = 0;
       cancelled = false;
       selecting = false;
       gestureMode = null;
