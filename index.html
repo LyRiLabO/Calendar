@@ -329,6 +329,51 @@
   }
   .card-ghost .resize-handle{ display:none; }
 
+  /* 長按行程卡片（不拖動）跳出的「複製／刪除」快捷選單 */
+  .card-menu{
+    position:fixed;
+    display:flex;
+    background:var(--ink);
+    border-radius:11px;
+    box-shadow:0 10px 24px rgba(32,38,58,0.4);
+    overflow:visible;
+    z-index:1000;
+  }
+  .card-menu button{
+    border:none;
+    background:none;
+    color:var(--paper);
+    font-family:'Noto Sans TC', sans-serif;
+    font-size:13.5px;
+    font-weight:700;
+    padding:11px 18px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .card-menu button:first-child{
+    border-radius:11px 0 0 11px;
+  }
+  .card-menu button:last-child{
+    border-radius:0 11px 11px 0;
+  }
+  .card-menu button + button{
+    border-left:1px solid rgba(246,241,228,0.22);
+  }
+  .card-menu button:active{background:rgba(246,241,228,0.14);}
+  .card-menu button.danger{color:#F4B8AA;}
+  .card-menu.arrow-down::after,
+  .card-menu.arrow-up::after{
+    content:"";
+    position:absolute;
+    left:50%;
+    transform:translateX(-50%);
+    border-width:6px 6px 0 6px;
+    border-style:solid;
+    border-color:var(--ink) transparent transparent transparent;
+  }
+  .card-menu.arrow-down::after{ bottom:-6px; }
+  .card-menu.arrow-up::after{ top:-6px; transform:translateX(-50%) rotate(180deg); }
+
   /* 時長 < 45 分鐘：高度放不下兩行，標題與時間改成同一行並排 */
   .event-card.compact{
     display:flex;
@@ -1051,6 +1096,88 @@
     if(master.overrides) delete master.overrides[instanceDate];
   }
 
+  // 複製這一次行程：在同一天建立一個內容完全一樣、獨立不重複的新行程
+  function duplicateInstance(masterId, instanceDate){
+    const inst = getInstancesForDate(instanceDate).find(i => i.masterId === masterId);
+    if(!inst) return;
+    events.push({
+      id: 'e' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+      title: inst.title,
+      date: instanceDate,
+      start: inst.start,
+      end: inst.end,
+      notes: inst.notes,
+      participants: (inst.participants||[]).slice(),
+      recurrence: null
+    });
+  }
+
+  // 快速刪除這一次行程（長按選單用）：非重複行程直接刪掉；重複行程只排除
+  // 這一天，系列其餘日期不受影響——跟拖曳移動/縮放預設「只改這一次」一致。
+  function deleteInstanceQuick(masterId, instanceDate){
+    const master = events.find(e => e.id === masterId);
+    if(!master) return;
+    if(!master.recurrence){
+      events = events.filter(e => e !== master);
+      return;
+    }
+    master.excluded = master.excluded || [];
+    if(master.excluded.indexOf(instanceDate) === -1) master.excluded.push(instanceDate);
+    if(master.overrides) delete master.overrides[instanceDate];
+  }
+
+  /* ---------------- 長按卡片（不拖動）跳出的「複製／刪除」快捷選單 ---------------- */
+  let cardMenuEl = null;
+
+  function closeCardMenu(){
+    if(cardMenuEl){ cardMenuEl.remove(); cardMenuEl = null; }
+  }
+
+  function openCardMenu(card, masterId, instanceDate){
+    closeCardMenu();
+    const rect = card.getBoundingClientRect();
+
+    const menu = document.createElement('div');
+    menu.className = 'card-menu';
+    menu.innerHTML =
+      '<button type="button" data-action="dup">複製</button>' +
+      '<button type="button" data-action="del" class="danger">刪除</button>';
+    document.body.appendChild(menu);
+
+    const menuRect = menu.getBoundingClientRect();
+    let left = rect.left + rect.width/2 - menuRect.width/2;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuRect.width - 8));
+    let top = rect.top - menuRect.height - 10;
+    let arrowDown = true;
+    if(top < 8){ top = rect.bottom + 10; arrowDown = false; } // 卡片太靠畫面上緣就改顯示在下方
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    menu.classList.add(arrowDown ? 'arrow-down' : 'arrow-up');
+
+    menu.querySelector('[data-action="dup"]').addEventListener('click', function(ev){
+      ev.stopPropagation();
+      duplicateInstance(masterId, instanceDate);
+      closeCardMenu();
+      renderEvents();
+    });
+    menu.querySelector('[data-action="del"]').addEventListener('click', function(ev){
+      ev.stopPropagation();
+      deleteInstanceQuick(masterId, instanceDate);
+      closeCardMenu();
+      renderEvents();
+    });
+
+    cardMenuEl = menu;
+  }
+
+  // 用 capture 階段監聽，確保比任何卡片自己的 pointerdown（會 stopPropagation）
+  // 都還早判斷到「點了選單以外的地方」，藉此正確關閉選單。
+  document.addEventListener('pointerdown', function(e){
+    if(!cardMenuEl) return;
+    if(cardMenuEl.contains(e.target)) return; // 點選單本身不算「點空白處」
+    closeCardMenu();
+  }, true);
+
   /* ---------------- 時間軸主頁 ---------------- */
   const timelineGrid = document.getElementById('timelineGrid');
   const eventsLayer = document.getElementById('eventsLayer');
@@ -1114,6 +1241,7 @@
 
   function renderEvents(){
     saveToStorage(); // 每次重繪代表資料可能剛異動過，順便存起來
+    closeCardMenu(); // 畫面要重繪了，任何還開著的快捷選單先收起來，避免指到舊卡片
     eventsLayer.innerHTML = '';
     renderColumnDividers();
     const insts = getInstancesForDate(currentDate);
@@ -1398,7 +1526,7 @@
     if(edgeFlipTimer){ clearTimeout(edgeFlipTimer); edgeFlipTimer = null; }
   }
 
-  function startFloatingDrag(inst, runMin, runMax, sourceCard, clientX, clientY){
+  function startFloatingDrag(inst, runMin, runMax, sourceCard, grabX, grabY, curX, curY){
     const rect = sourceCard.getBoundingClientRect();
     const ghost = sourceCard.cloneNode(true);
     ghost.removeAttribute('id');
@@ -1414,16 +1542,18 @@
       ghost: ghost,
       w: rect.width,
       h: rect.height,
-      // 手指抓住卡片時，指尖相對卡片左上角的位置——讓 ghost 全程保持
-      // 手指原本抓的那個點，不要因為置中對齊而跳動；放開時也要用同一套
-      // 偏移量換算回卡片左上角，才會跟畫面上看到的落點位置一致。
-      grabOffsetX: clientX - rect.left,
-      grabOffsetY: clientY - rect.top,
+      // 手指「一開始抓住」卡片時，指尖相對卡片左上角的位置——讓 ghost 全程
+      // 保持手指原本抓的那個點，不要因為置中對齊而跳動；放開時也要用同一
+      // 套偏移量換算回卡片左上角，才會跟畫面上看到的落點位置一致。用最初
+      // 抓取的座標(grabX/grabY)算偏移量，而不是轉成拖曳當下的座標，是為了
+      // 避免「長按跳出選單→移動一段距離才轉成拖曳」時 ghost 瞬間跳位。
+      grabOffsetX: grabX - rect.left,
+      grabOffsetY: grabY - rect.top,
       span: runMax - runMin,
       durationMin: timeToMinutes(inst.end) - timeToMinutes(inst.start),
       lastEdgeDir: null
     };
-    positionGhost(clientX, clientY);
+    positionGhost(curX, curY);
     renderEvents(); // 立刻重繪一次：本尊卡片先隱藏，畫面上只剩浮動的 ghost
   }
 
@@ -1482,7 +1612,7 @@
   /* ---------------- 長按拖拽（防誤觸） ---------------- */
   function attachCardInteractions(card, inst, runMin, runMax){
     let longPressTimer = null;
-    let dragging = false;
+    let phase = 'idle'; // 'idle' → 'menu'(長按跳出選單，尚未拖動) → 'dragging'(移動夠多，轉成浮動拖曳)
     let cancelledByScroll = false;
     let startX = 0;
     let startY = 0;
@@ -1498,21 +1628,22 @@
       lastY = e.clientY;
       lastMoveTime = performance.now();
       scrollVelocity = 0;
-      dragging = false;
+      phase = 'idle';
       cancelledByScroll = false;
 
       longPressTimer = setTimeout(function(){
         if(cancelledByScroll) return;
-        dragging = true;
+        phase = 'menu';
         if(navigator.vibrate) navigator.vibrate(15);
-        startFloatingDrag(inst, runMin, runMax, card, e.clientX, e.clientY);
+        openCardMenu(card, inst.masterId, inst.instanceDate);
       }, 400);
 
       const onMove = function(ev2){
         const dy = ev2.clientY - startY;
-        if(!dragging){
+
+        if(phase === 'idle'){
           // 卡片本身是 touch-action:none，瀏覽器不會自動幫忙捲動頁面，
-          // 所以一旦判定使用者其實是想捲動（而不是要長按拖曳），要自己
+          // 所以一旦判定使用者其實是想捲動（而不是要長按），要自己
           // 動手把 scrollTop 往回推，才會有正常的捲動手感；未達門檻前
           // （手指還沒移動超過 16px）完全不動，讓長按判斷保有優先權。
           if(!cancelledByScroll && Math.abs(dy) > 16){
@@ -1530,6 +1661,20 @@
           lastY = ev2.clientY;
           return;
         }
+
+        if(phase === 'menu'){
+          // 選單已經跳出來了：手指如果開始明顯移動，代表使用者其實是要
+          // 拖曳搬移這個行程，不是要用選單——收起選單，轉成浮動拖曳。
+          const dx = ev2.clientX - startX;
+          if(Math.abs(dx) > 10 || Math.abs(ev2.clientY - startY) > 10){
+            closeCardMenu();
+            phase = 'dragging';
+            startFloatingDrag(inst, runMin, runMax, card, startX, startY, ev2.clientX, ev2.clientY);
+          }
+          return;
+        }
+
+        // phase === 'dragging'
         ev2.preventDefault();
         updateFloatingDrag(ev2.clientX, ev2.clientY);
       };
@@ -1540,8 +1685,11 @@
         document.removeEventListener('pointerup', onUp);
         document.removeEventListener('pointercancel', onUp);
 
-        if(dragging){
+        if(phase === 'dragging'){
           endFloatingDrag(ev2.clientX, ev2.clientY);
+        } else if(phase === 'menu'){
+          // 長按後直接放開：選單維持顯示，等使用者點選單裡的按鈕，
+          // 或點畫面其他地方讓它自動收起。
         } else if(cancelledByScroll){
           startMomentumScroll(scrollVelocity);
         } else {
@@ -1863,7 +2011,6 @@
     };
     events.push(ev);
     renderEvents();
-    openEdit(id, currentDate);
   }
 
   document.getElementById('fabAdd').addEventListener('click', function(){
