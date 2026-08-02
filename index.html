@@ -1545,9 +1545,9 @@
     let longPressTimer = null;
     let resizing = false;
     let startX = 0, startY = 0;
-    let origHeight = 0, origTop = 0;
+    let origHeight = 0, origTop = 0, origWidthPx = 0;
     let startScrollTop = 0;
-    let pendingRunMax = runMax;
+    let finalHeight = 0, finalWidthPx = 0;
 
     handle.addEventListener('pointerdown', function(e){
       e.stopPropagation(); // 不要觸發卡片本體「移動時間」的那組互動
@@ -1555,8 +1555,10 @@
       startY = e.clientY;
       origHeight = parseFloat(card.style.height) || 0;
       origTop = parseFloat(card.style.top) || 0;
+      origWidthPx = card.getBoundingClientRect().width;
       startScrollTop = timelineScroll.scrollTop;
-      pendingRunMax = runMax;
+      finalHeight = origHeight;
+      finalWidthPx = origWidthPx;
       resizing = false;
 
       longPressTimer = setTimeout(function(){
@@ -1578,22 +1580,21 @@
         }
         e2.preventDefault();
 
-        // 上下拖曳：改變高度（時長），起始時間固定，只延伸/縮短下緣
+        // 上下拖曳：高度直接跟著手指的原始位移連續變化，拖曳過程中不吸附，
+        // 起始時間固定，只延伸/縮短下緣，放開的那一刻才吸附到 15 分鐘格線。
         let newHeight = origHeight + (e2.clientY - startY);
-        newHeight = Math.max(12.5, Math.min(newHeight, 1200 - origTop));
-        newHeight = Math.round(newHeight/12.5)*12.5; // 吸附 15 分鐘
-        card.style.height = newHeight+'px';
+        newHeight = Math.max(8, Math.min(newHeight, 1200 - origTop));
+        finalHeight = newHeight;
+        card.style.height = newHeight + 'px';
 
-        // 左右拖曳：改變欄位範圍（右緣，起始欄不動）
-        const rect = eventsLayer.getBoundingClientRect();
-        const n = Math.max(1, columns.length);
-        const colWidthPx = rect.width / n;
-        const dCols = Math.round((e2.clientX - startX) / colWidthPx);
-        pendingRunMax = Math.max(runMin, Math.min(n-1, runMax + dCols));
-        const leftPct = (runMin/n*100);
-        const widthPct = ((pendingRunMax-runMin+1)/n*100);
-        card.style.left = 'calc(' + leftPct + '% + 3px)';
-        card.style.width = 'calc(' + widthPct + '% - 6px)';
+        // 左右拖曳：寬度同樣直接跟著手指的原始像素位移連續變化（不是整欄
+        // 整欄跳），左緣（起始欄）固定不動，放開才換算成實際涵蓋幾欄。
+        const evRect = eventsLayer.getBoundingClientRect();
+        const cardLeft = card.getBoundingClientRect().left;
+        let newWidthPx = origWidthPx + (e2.clientX - startX);
+        newWidthPx = Math.max(20, Math.min(newWidthPx, evRect.right - cardLeft));
+        finalWidthPx = newWidthPx;
+        card.style.width = newWidthPx + 'px';
       };
 
       const onUp = function(e2){
@@ -1606,12 +1607,19 @@
           card.classList.remove('resizing');
           handle.classList.remove('active');
 
-          const finalHeight = parseFloat(card.style.height);
+          // 高度 → 吸附到 15 分鐘
           let durationMin = Math.round(finalHeight/50*60/15)*15;
           durationMin = Math.max(15, durationMin);
           const startMinAbs = Math.round(origTop/50*60);
           const newStart = minutesToTime(startMinAbs);
           const newEnd = minutesToTime(startMinAbs + durationMin);
+
+          // 寬度 → 換算成實際涵蓋幾欄（四捨五入到最接近的整欄數，起始欄不變）
+          const evRect = eventsLayer.getBoundingClientRect();
+          const n = Math.max(1, columns.length);
+          const colWidthPx = evRect.width / n;
+          const spanCols = Math.max(1, Math.min(n - runMin, Math.round(finalWidthPx / colWidthPx)));
+          const pendingRunMax = runMin + spanCols - 1;
 
           // 把這個分段原本涵蓋的欄位，換成拖曳後的新範圍（runMin 不變）
           const origIds = columns.slice(runMin, runMax+1).map(c=>c.id);
