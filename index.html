@@ -174,11 +174,25 @@
     touch-action:pan-y;
     overscroll-behavior:contain;
   }
-  .timeline-grid{
+  .day-slider{
     position:relative;
-    height:1200px; /* 24 * 50px */
-    margin:0 16px 0 0;
+    height:1200px; /* 24 * 50px，撐開外層可以捲動的高度 */
+    overflow-x:hidden;
+  }
+  .timeline-grid, .day-preview-panel{
+    position:absolute;
+    top:0; left:0; right:16px;
+    height:1200px;
+  }
+  .timeline-grid{
     touch-action:none;
+  }
+  .day-preview-panel{
+    pointer-events:none; /* 純預覽用，滑動中不可互動 */
+  }
+  .day-slider.animating .timeline-grid,
+  .day-slider.animating .day-preview-panel{
+    transition:transform .3s cubic-bezier(.2,.7,.3,1);
   }
   .margin-rule{
     position:absolute;
@@ -716,11 +730,13 @@
 
     <div class="timeline-scroll" id="timelineScroll">
       <div class="column-header-row" id="columnHeaderRow"></div>
-      <div class="timeline-grid" id="timelineGrid">
-        <div class="margin-rule"></div>
-        <!-- hour-row 由 JS 產生 -->
-        <div class="col-dividers" id="colDividers"></div>
-        <div class="events-layer" id="eventsLayer"></div>
+      <div class="day-slider" id="daySlider">
+        <div class="timeline-grid" id="timelineGrid">
+          <div class="margin-rule"></div>
+          <!-- hour-row 由 JS 產生 -->
+          <div class="col-dividers" id="colDividers"></div>
+          <div class="events-layer" id="eventsLayer"></div>
+        </div>
       </div>
     </div>
 
@@ -818,6 +834,11 @@
     return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
   };
   const T0 = todayStr();
+  const dateByOffset = (dateStr, delta) => {
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m-1, d+delta);
+    return dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());
+  };
 
   // 每個 column 代表一位共編者自己的直向欄位
   let columns = [
@@ -987,6 +1008,31 @@
     }
   }
 
+  // 把某一天的行程搬到另一個日期（拖曳行程到畫面邊緣切日時使用）。
+  // 非重複行程：直接改日期。重複行程：把「這一天」從系列中排除，
+  // 另外在新日期建立一個獨立的（不重複）行程，系列其餘日期不受影響。
+  function moveInstanceToDate(masterId, instanceDate, targetDate){
+    const master = events.find(e => e.id === masterId);
+    if(!master) return;
+    if(!master.recurrence){
+      master.date = targetDate;
+      return;
+    }
+    const ov = (master.overrides && master.overrides[instanceDate]) || {};
+    events.push({
+      id: 'e' + Date.now() + '-' + Math.random().toString(36).slice(2,6),
+      title: ov.title !== undefined ? ov.title : master.title,
+      date: targetDate,
+      start: ov.start !== undefined ? ov.start : master.start,
+      end: ov.end !== undefined ? ov.end : master.end,
+      notes: ov.notes !== undefined ? ov.notes : master.notes,
+      participants: (ov.participants !== undefined ? ov.participants : master.participants).slice()
+    });
+    master.excluded = master.excluded || [];
+    if(master.excluded.indexOf(instanceDate) === -1) master.excluded.push(instanceDate);
+    if(master.overrides) delete master.overrides[instanceDate];
+  }
+
   /* ---------------- 時間軸主頁 ---------------- */
   const timelineGrid = document.getElementById('timelineGrid');
   const eventsLayer = document.getElementById('eventsLayer');
@@ -1148,6 +1194,156 @@
     renderEvents();
   }
 
+  /* ---------------- 跨日滑動轉場（左右滑動切日 / 拖曳行程到畫面邊緣切日 共用） ----------------
+     核心概念：畫面上同時放著「目前這天」跟「即將滑入的那一天（唯讀預覽，
+     不能互動）」兩塊面板，手勢移動多少，兩塊面板就一起平移多少，感覺
+     跟垂直捲動一樣連貫；放開後如果滑動幅度夠大就用動畫把畫面接續著滑
+     完最後一小段，此時才真的切換 currentDate 並重新整理成完整可互動的
+     內容；幅度不夠就用動畫彈回原位，不改變日期。 */
+  const daySlider = document.getElementById('daySlider');
+  let previewPanel = null;
+  let previewDirection = null; // 'next' 表示手勢往左滑、預覽面板是明天；'prev' 則是昨天
+
+  // 產生某一天的「唯讀預覽」面板：只畫時間格線、欄位分隔線、行程卡片外觀，
+  // 不綁任何長按/拖曳互動，純粹給滑動轉場當中的視覺過場使用。
+  function buildStaticDayPanel(dateStr){
+    const panel = document.createElement('div');
+    panel.className = 'timeline-grid day-preview-panel';
+
+    for(let h=0; h<24; h++){
+      const row = document.createElement('div');
+      row.className = 'hour-row';
+      row.style.top = (h*50)+'px';
+      row.innerHTML = '<span class="hlabel">'+pad2(h)+':00</span><span class="half-tick"></span>';
+      panel.appendChild(row);
+    }
+
+    const n = Math.max(1, columns.length);
+    const dividers = document.createElement('div');
+    dividers.className = 'col-dividers';
+    for(let i=1; i<n; i++){
+      const line = document.createElement('div');
+      line.className = 'col-div-line';
+      line.style.left = (i/n*100)+'%';
+      dividers.appendChild(line);
+    }
+    panel.appendChild(dividers);
+
+    const layer = document.createElement('div');
+    layer.className = 'events-layer';
+    getInstancesForDate(dateStr).forEach(inst => {
+      const startMin = timeToMinutes(inst.start);
+      const endMin = timeToMinutes(inst.end);
+      const top = startMin/60*50;
+      const height = Math.max(8, (endMin-startMin)/60*50);
+      const durationMin = endMin-startMin;
+      const runs = eventColRuns(inst);
+      const firstIdx = runs[0][0];
+      const names = (inst.participants||[])
+        .map(pid => { const c = columns.find(x=>x.id===pid); return c ? c.name : null; })
+        .filter(Boolean).join('、');
+      const title = escapeHtml(inst.title||'(未命名行程)');
+      const timeStr = inst.start+' - '+inst.end;
+
+      runs.forEach(([runMin, runMax]) => {
+        const card = document.createElement('div');
+        card.className = 'event-card c-'+colByIndex(firstIdx);
+        card.style.top = top+'px';
+        card.style.height = height+'px';
+        card.style.left = 'calc(' + (runMin/n*100) + '% + 3px)';
+        card.style.width = 'calc(' + ((runMax-runMin+1)/n*100) + '% - 6px)';
+        if(durationMin < 15){
+          card.classList.add('tiny');
+          card.innerHTML = '<span class="ecard-solo">'+title+' · '+timeStr+'</span>';
+        } else if(durationMin < 45){
+          card.classList.add('compact');
+          card.innerHTML = '<div class="ecard-row"><span class="ecard-title">'+title+'</span><span class="ecard-time">'+timeStr+'</span></div>';
+        } else {
+          card.innerHTML = '<div class="ecard-title">'+title+'</div><div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
+        }
+        layer.appendChild(card);
+        if(durationMin < 15) fitTinyCardText(card);
+      });
+    });
+    panel.appendChild(layer);
+    return panel;
+  }
+
+  function ensurePreviewPanel(direction){
+    if(previewPanel && previewDirection === direction) return previewPanel;
+    if(previewPanel){ previewPanel.remove(); previewPanel = null; }
+    previewDirection = direction;
+    const targetDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
+    const panel = buildStaticDayPanel(targetDate);
+    panel.style.transform = 'translateX(' + (direction === 'next' ? '100%' : '-100%') + ')';
+    daySlider.appendChild(panel);
+    previewPanel = panel;
+    return panel;
+  }
+
+  // 手勢進行中：即時跟著手指位移量(dx，往左滑為負值)平移兩塊面板
+  function updateDaySlide(dx){
+    const w = daySlider.clientWidth || 1;
+    const direction = dx < 0 ? 'next' : 'prev';
+    ensurePreviewPanel(direction);
+    const clamped = Math.max(-w, Math.min(w, dx));
+    timelineGrid.style.transform = 'translateX(' + clamped + 'px)';
+    const base = direction === 'next' ? w : -w;
+    previewPanel.style.transform = 'translateX(' + (base + clamped) + 'px)';
+  }
+
+  // 放開手指：滑動幅度夠大就用動畫接續滑完、真的切換日期；不夠就彈回原位
+  function endDaySlide(dx){
+    const w = daySlider.clientWidth || 1;
+    const threshold = w * 0.28;
+    const commit = Math.abs(dx) > threshold && previewPanel;
+    daySlider.classList.add('animating');
+
+    if(commit){
+      const delta = dx < 0 ? 1 : -1;
+      timelineGrid.style.transform = 'translateX(' + (dx < 0 ? -w : w) + 'px)';
+      previewPanel.style.transform = 'translateX(0px)';
+      setTimeout(function(){
+        daySlider.classList.remove('animating');
+        currentDate = dateByOffset(currentDate, delta);
+        if(previewPanel){ previewPanel.remove(); previewPanel = null; }
+        timelineGrid.style.transform = '';
+        renderTimeline();
+      }, 300);
+    } else {
+      timelineGrid.style.transform = 'translateX(0px)';
+      if(previewPanel){
+        const base = previewDirection === 'next' ? w : -w;
+        previewPanel.style.transform = 'translateX(' + base + 'px)';
+      }
+      setTimeout(function(){
+        daySlider.classList.remove('animating');
+        if(previewPanel){ previewPanel.remove(); previewPanel = null; }
+        timelineGrid.style.transform = '';
+      }, 300);
+    }
+  }
+
+  // 立即觸發完成一次日期切換的滑動動畫（給「拖曳行程到畫面邊緣」用，
+  // 不是使用者手動滑出來的位移，是碰到邊緣就自動觸發一次完整轉場）。
+  function animateCommitDaySlide(direction, onDone){
+    const w = daySlider.clientWidth || 1;
+    ensurePreviewPanel(direction);
+    daySlider.classList.add('animating');
+    requestAnimationFrame(function(){
+      timelineGrid.style.transform = 'translateX(' + (direction === 'next' ? -w : w) + 'px)';
+      previewPanel.style.transform = 'translateX(0px)';
+    });
+    setTimeout(function(){
+      daySlider.classList.remove('animating');
+      currentDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
+      if(previewPanel){ previewPanel.remove(); previewPanel = null; }
+      timelineGrid.style.transform = '';
+      renderTimeline();
+      if(onDone) onDone();
+    }, 300);
+  }
+
   /* ---------------- 長按拖拽（防誤觸） ---------------- */
   function attachCardInteractions(card, inst, runMin, runMax){
     let longPressTimer = null;
@@ -1159,6 +1355,8 @@
     let origTop = 0;
     let pendingRunMin = runMin;
     let pendingRunMax = runMax;
+    let edgeHoldTimer = null;
+    let edgeTriggered = false;
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
@@ -1170,6 +1368,7 @@
       pendingRunMax = runMax;
       dragging = false;
       cancelledByScroll = false;
+      edgeTriggered = false;
 
       longPressTimer = setTimeout(function(){
         if(cancelledByScroll) return;
@@ -1187,6 +1386,40 @@
         return Array.from(eventsLayer.querySelectorAll(
           '.event-card[data-master-id="'+inst.masterId+'"][data-date="'+inst.instanceDate+'"]'
         ));
+      }
+
+      // 拖曳中把行程「放到」目前位置對應的時間／欄位，並搬到 targetDate。
+      // 用在「拖到畫面邊緣、觸發跨日切換」的時候：碰到邊緣停留夠久，就
+      // 直接視為使用者要把這個行程丟到隔壁那一天，跟放開手指一樣去
+      // 完成一次落定，只是額外多了「換到新的一天」這個步驟。
+      function commitToAdjacentDay(direction){
+        clearTimeout(longPressTimer);
+        clearTimeout(edgeHoldTimer);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        siblingCards().forEach(c => c.classList.remove('dragging'));
+        card.style.touchAction = '';
+
+        const rawTop = parseFloat(card.style.top);
+        const snappedStartMin = Math.round(Math.round(rawTop/50*60)/15)*15;
+        const durationMin = timeToMinutes(inst.end) - timeToMinutes(inst.start);
+        const newStartMin = Math.max(0, Math.min(23*60, snappedStartMin));
+        const newStart = minutesToTime(newStartMin);
+        const newEnd = minutesToTime(newStartMin + durationMin);
+        const origIds = columns.slice(runMin, runMax+1).map(c=>c.id);
+        const newIds = columns.slice(pendingRunMin, pendingRunMax+1).map(c=>c.id);
+        const pset = new Set(inst.participants||[]);
+        origIds.forEach(id => { if(newIds.indexOf(id)===-1) pset.delete(id); });
+        newIds.forEach(id => pset.add(id));
+        quickSetTimeAndParticipants(inst.masterId, inst.instanceDate, newStart, newEnd, Array.from(pset));
+
+        const masterId = inst.masterId, instanceDate = inst.instanceDate;
+        const targetDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
+        animateCommitDaySlide(direction, function(){
+          moveInstanceToDate(masterId, instanceDate, targetDate);
+          renderEvents();
+        });
       }
 
       const onMove = function(ev2){
@@ -1228,10 +1461,30 @@
         const widthPct = ((span+1)/n*100);
         card.style.left = 'calc(' + leftPct + '% + 3px)';
         card.style.width = 'calc(' + widthPct + '% - 6px)';
+
+        // 拖到畫面最左/右邊緣附近，停留一下就自動觸發切換到前/後一天
+        // （跟編輯手機主畫面拖動 App 圖示到邊緣會自動翻頁是同樣的操作方式）。
+        if(!edgeTriggered){
+          const nearLeft = ev2.clientX - rect.left < 34;
+          const nearRight = rect.right - ev2.clientX < 34;
+          if(nearLeft || nearRight){
+            if(!edgeHoldTimer){
+              const direction = nearRight ? 'next' : 'prev';
+              edgeHoldTimer = setTimeout(function(){
+                edgeTriggered = true;
+                commitToAdjacentDay(direction);
+              }, 550);
+            }
+          } else if(edgeHoldTimer){
+            clearTimeout(edgeHoldTimer);
+            edgeHoldTimer = null;
+          }
+        }
       };
 
       const onUp = function(ev2){
         clearTimeout(longPressTimer);
+        clearTimeout(edgeHoldTimer);
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.removeEventListener('pointercancel', onUp);
@@ -1403,10 +1656,11 @@
   }
 
   (function(){
-    let downY = 0, downX = 0, downTime = 0, lastY = 0, anchorPx = 0, anchorColIdx = 0;
+    let downY = 0, downX = 0, lastY = 0, anchorPx = 0, anchorColIdx = 0;
     let longPressTimer = null;
     let selecting = false;
     let cancelled = false;
+    let gestureMode = null; // 一旦離開長按判斷，決定是 'scroll'（捲動）還是 'swipeday'（左右滑動切日），決定後就不再切換
 
     function colIdxFromX(clientX){
       const rect = eventsLayer.getBoundingClientRect();
@@ -1421,16 +1675,22 @@
 
       if(!selecting){
         // timeline-grid 是 touch-action:none，瀏覽器不會自動幫忙捲動，
-        // 所以一旦判定使用者其實是想捲動／左右滑動換日（而不是要長按
-        // 拉框），要自己動手把 scrollTop 往回推，才會有正常的捲動手感。
-        // 上下移動視為捲動；左右移動幅度較大則視為「切換日期」的滑動手勢，
-        // 兩者都不該被誤判成長按進入選取模式，所以都要取消計時器。
-        if(!cancelled && (Math.abs(e.clientY - downY) > 8 || Math.abs(e.clientX - downX) > 15)){
-          cancelled = true;
-          clearTimeout(longPressTimer);
+        // 所以一旦判定使用者其實是想捲動或左右滑動切日（而不是要長按
+        // 拉框），要自己接手處理，才會有正常的手勢手感。
+        if(!cancelled){
+          const dy = e.clientY - downY;
+          const dx = e.clientX - downX;
+          if(Math.abs(dy) > 8 || Math.abs(dx) > 15){
+            cancelled = true;
+            clearTimeout(longPressTimer);
+            gestureMode = (Math.abs(dx) > Math.abs(dy)) ? 'swipeday' : 'scroll';
+          }
         }
-        if(cancelled){
+        if(gestureMode === 'scroll'){
           timelineScroll.scrollTop -= (e.clientY - lastY);
+        } else if(gestureMode === 'swipeday'){
+          e.preventDefault();
+          updateDaySlide(e.clientX - downX); // 畫面即時跟著手指位移滑動，跟垂直捲動同樣的連貫手感
         }
         lastY = e.clientY;
         return;
@@ -1465,18 +1725,13 @@
         const endMin = Math.round((top+height)/50*60);
         const participantIds = columns.slice(colMin, colMax+1).map(c=>c.id);
         createNewEvent(startMin, endMin, participantIds);
-      } else {
-        // 判斷是不是「左右滑動切換日期」的手勢：橫向位移夠大、
-        // 縱向位移不大（不是在捲動）、而且是一次快速的滑動。
-        const dx = e.clientX - downX;
-        const dy = e.clientY - downY;
-        const elapsed = Date.now() - downTime;
-        if(Math.abs(dx) > 60 && Math.abs(dy) < 50 && Math.abs(dx) > Math.abs(dy)*1.5 && elapsed < 600){
-          shiftDate(dx < 0 ? 1 : -1); // 往左滑＝看下一天，往右滑＝看前一天
-        }
+      } else if(gestureMode === 'swipeday'){
+        // 放開手指：滑動幅度夠大就用動畫接續完成切日，不夠就彈回原位
+        endDaySlide(e.clientX - downX);
       }
       selecting = false;
       cancelled = false;
+      gestureMode = null;
     }
 
     timelineGrid.addEventListener('pointerdown', function(e){
@@ -1484,9 +1739,9 @@
       downY = e.clientY;
       downX = e.clientX;
       lastY = e.clientY;
-      downTime = Date.now();
       cancelled = false;
       selecting = false;
+      gestureMode = null;
       const rect = eventsLayer.getBoundingClientRect();
       anchorPx = e.clientY - rect.top;
       anchorColIdx = colIdxFromX(e.clientX);
