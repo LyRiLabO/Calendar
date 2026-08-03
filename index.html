@@ -295,10 +295,10 @@
   .event-card.c-sage{border-left-color:var(--sage);}
   .event-card.c-dusk{border-left-color:var(--dusk);}
   .event-card.c-blush{border-left-color:var(--blush);}
-  .event-card.c-gold .resize-handle{background:var(--gold);}
-  .event-card.c-sage .resize-handle{background:var(--sage);}
-  .event-card.c-dusk .resize-handle{background:var(--dusk);}
-  .event-card.c-blush .resize-handle{background:var(--blush);}
+  .event-card.c-gold .resize-handle::after{background:var(--gold);}
+  .event-card.c-sage .resize-handle::after{background:var(--sage);}
+  .event-card.c-dusk .resize-handle::after{background:var(--dusk);}
+  .event-card.c-blush .resize-handle::after{background:var(--blush);}
   .event-card.dragging{
     transform:scale(1.04);
     box-shadow:0 10px 26px var(--shadow);
@@ -310,17 +310,25 @@
   }
   .resize-handle{
     position:absolute;
-    right:-8px; bottom:-8px;
+    right:-13px; bottom:-13px;
+    width:36px; height:36px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:se-resize;
+    touch-action:none;
+    z-index:13;
+  }
+  .resize-handle::after{
+    content:"";
+    display:block;
     width:26px; height:26px;
     border-radius:50%;
     background:var(--ink);
     border:2.5px solid var(--paper);
-    cursor:se-resize;
-    touch-action:none;
-    z-index:13;
     transition:transform .12s ease;
   }
-  .resize-handle.active{
+  .resize-handle.active::after{
     transform:scale(1.7);
   }
 
