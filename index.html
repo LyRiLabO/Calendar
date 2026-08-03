@@ -585,7 +585,8 @@
     width:100%;
   }
   .field input:focus-visible,
-  .field textarea:focus-visible{
+  .field textarea:focus-visible,
+  .time-trio input:focus-visible{
     outline:none;
     border-bottom-color:var(--red);
   }
@@ -598,6 +599,60 @@
     border-radius:8px;
     padding:12px;
     background:var(--card);
+  }
+
+  .ticket{
+    display:flex;
+    background:var(--card);
+    border-radius:12px;
+    box-shadow:0 2px 8px var(--shadow);
+    position:relative;
+    overflow:visible;
+  }
+  .ticket::before, .ticket::after{
+    content:"";
+    position:absolute;
+    top:50%; transform:translateY(-50%);
+    width:16px; height:16px;
+    background:var(--paper);
+    border-radius:50%;
+  }
+  .ticket::before{left:-8px;}
+  .ticket::after{right:-8px;}
+  .time-trio{
+    display:flex;
+    width:100%;
+    padding:14px 16px;
+  }
+  .time-trio .tcell{
+    flex:1;
+    display:flex; flex-direction:column; gap:6px;
+    position:relative;
+  }
+  .time-trio .tcell + .tcell{
+    margin-left:12px;
+    padding-left:12px;
+    border-left:1px dashed var(--line);
+  }
+  .time-trio label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:9px;
+    letter-spacing:.08em;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+  }
+  .time-trio input{
+    border:none;
+    background:transparent;
+    font-family:'JetBrains Mono', monospace;
+    font-weight:700;
+    font-size:15px;
+    color:var(--ink);
+    padding:2px 0;
+    width:100%;
+  }
+  .time-trio input[type=number]{
+    -moz-appearance:textfield;
   }
 
   .delete-btn{
@@ -791,6 +846,26 @@
       </div>
 
       <div class="field">
+        <span class="field-label">時間設定</span>
+        <div class="ticket">
+          <div class="time-trio">
+            <div class="tcell">
+              <label for="fieldStart">開始時間</label>
+              <input id="fieldStart" type="time" step="900">
+            </div>
+            <div class="tcell">
+              <label for="fieldEnd">結束時間</label>
+              <input id="fieldEnd" type="time" step="900">
+            </div>
+            <div class="tcell">
+              <label for="fieldDuration">所需分鐘</label>
+              <input id="fieldDuration" type="number" min="15" step="15" inputmode="numeric">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
         <span class="field-label">重複</span>
         <div class="weekday-box" id="weekdayBox"></div>
       </div>
@@ -922,91 +997,6 @@
     }
     runs.push([start, prev]);
     return runs;
-  }
-
-  // 排版演算法：把一天內所有行程展開成一個個「分段」（跨不相鄰欄位的行程
-  // 本來就會拆成好幾段），偵測「欄位範圍重疊 且 時間範圍重疊」的分段，
-  // 自動分成一群一群，同一群裡的分段會側排（切成好幾條窄一點的欄位），
-  // 保證同一群裡的分段彼此絕對不會互相覆蓋；不同群之間本來就沒有交集，
-  // 各自用自己原本的欄位範圍顯示即可。
-  function layoutInstancesForDay(insts){
-    const segments = [];
-    insts.forEach(inst => {
-      const startMin = timeToMinutes(inst.start);
-      const endMin = timeToMinutes(inst.end);
-      eventColRuns(inst).forEach(([runMin, runMax]) => {
-        segments.push({inst, runMin, runMax, startMin, endMin});
-      });
-    });
-
-    const n = segments.length;
-    const adj = Array.from({length:n}, () => []);
-    function collide(a, b){
-      const colOverlap = a.runMin <= b.runMax && b.runMin <= a.runMax;
-      const timeOverlap = a.startMin < b.endMin && b.startMin < a.endMin;
-      return colOverlap && timeOverlap;
-    }
-    for(let i=0; i<n; i++){
-      for(let j=i+1; j<n; j++){
-        if(collide(segments[i], segments[j])){ adj[i].push(j); adj[j].push(i); }
-      }
-    }
-
-    const visited = new Array(n).fill(false);
-    const layout = [];
-
-    for(let i=0; i<n; i++){
-      if(visited[i]) continue;
-      // BFS 找出跟 i 直接或間接重疊的整群
-      const stack = [i];
-      visited[i] = true;
-      const clusterIdxs = [];
-      while(stack.length){
-        const cur = stack.pop();
-        clusterIdxs.push(cur);
-        adj[cur].forEach(nb => { if(!visited[nb]){ visited[nb] = true; stack.push(nb); } });
-      }
-
-      if(clusterIdxs.length === 1){
-        const s = segments[clusterIdxs[0]];
-        layout.push({segment:s, colMin:s.runMin, colMax:s.runMax});
-        continue;
-      }
-
-      // 群組裡有重疊：用群組涵蓋的欄位範圍聯集，依開始時間貪婪指派最小
-      // 可用的「軌道」（同一時刻不能有兩段用同一條軌道），再把這個範圍
-      // 均分成軌道數那麼多條窄欄位，分段各自佔自己那一條，保證不重疊。
-      const clusterSegs = clusterIdxs.map(idx => segments[idx]);
-      const clusterColMin = Math.min(...clusterSegs.map(s => s.runMin));
-      const clusterColMax = Math.max(...clusterSegs.map(s => s.runMax));
-
-      const sorted = clusterSegs.slice().sort((a,b) => a.startMin - b.startMin || a.endMin - b.endMin);
-      const active = [];
-      let maxTrack = 0;
-      const trackOf = new Map();
-      sorted.forEach(seg => {
-        for(let k = active.length-1; k>=0; k--){
-          if(active[k].seg.endMin <= seg.startMin) active.splice(k, 1);
-        }
-        const used = new Set(active.map(a => a.track));
-        let track = 0;
-        while(used.has(track)) track++;
-        trackOf.set(seg, track);
-        active.push({seg, track});
-        maxTrack = Math.max(maxTrack, track+1);
-      });
-
-      clusterSegs.forEach(seg => {
-        layout.push({
-          segment: seg,
-          clusterColMin, clusterColMax,
-          track: trackOf.get(seg),
-          trackCount: maxTrack
-        });
-      });
-    }
-
-    return layout;
   }
 
   const WEEKDAYS = ['週日','週一','週二','週三','週四','週五','週六'];
@@ -1255,9 +1245,7 @@
     closeCardMenu(); // 畫面要重繪了，任何還開著的快捷選單先收起來，避免指到舊卡片
     eventsLayer.innerHTML = '';
     renderColumnDividers();
-    const insts = getInstancesForDate(currentDate).filter(inst =>
-      !(floatingDrag && floatingDrag.masterId === inst.masterId && floatingDrag.homeDate === inst.instanceDate)
-    );
+    const insts = getInstancesForDate(currentDate);
     if(insts.length === 0){
       const hint = document.createElement('div');
       hint.className = 'hint-empty';
@@ -1265,80 +1253,68 @@
       eventsLayer.appendChild(hint);
       return;
     }
-
-    const n = Math.max(1, columns.length);
-    const layout = layoutInstancesForDay(insts);
-
-    layout.forEach(entry => {
-      const seg = entry.segment;
-      const inst = seg.inst;
-      const runMin = seg.runMin, runMax = seg.runMax;
-      const top = seg.startMin/60*50;
-      const height = Math.max(8, (seg.endMin-seg.startMin)/60*50);
-
-      let leftPct, widthPct;
-      if(entry.trackCount){
-        // 這個分段跟別的行程有重疊：把群組涵蓋的欄位範圍均分成好幾條窄
-        // 欄位，自己只佔其中一條，確保絕對不會跟同群的其他分段重疊。
-        const clusterSpanCols = entry.clusterColMax - entry.clusterColMin + 1;
-        const laneWidthCols = clusterSpanCols / entry.trackCount;
-        const leftCols = entry.clusterColMin + entry.track*laneWidthCols;
-        leftPct = leftCols/n*100;
-        widthPct = laneWidthCols/n*100;
-      } else {
-        leftPct = entry.colMin/n*100;
-        widthPct = (entry.colMax-entry.colMin+1)/n*100;
+    insts.forEach(inst => {
+      if(floatingDrag && floatingDrag.masterId === inst.masterId && floatingDrag.homeDate === inst.instanceDate){
+        return; // 這個行程正在被浮動拖曳中，本尊先不畫，只顯示浮動的 ghost
       }
-
-      // 顏色統一用「這個行程」第一位參與者所在的欄位決定，不要用單一分段的
-      // runMin（同一行程橫跨不相鄰欄位時，每一段顏色才會保持一致）。
-      const firstIdx = eventColRuns(inst)[0][0];
+      const startMin = timeToMinutes(inst.start);
+      const endMin = timeToMinutes(inst.end);
+      const top = startMin/60*50;
+      const height = Math.max(8, (endMin-startMin)/60*50);
+      const n = columns.length;
+      const runs = eventColRuns(inst);
+      const firstIdx = runs[0][0]; // 顏色統一用第一位參與者，同一行程的每個分段顏色一致
       const names = (inst.participants||[])
         .map(pid => { const c = columns.find(x=>x.id===pid); return c ? c.name : null; })
         .filter(Boolean).join('、');
 
-      const card = document.createElement('div');
-      card.className = 'event-card ' + 'c-' + colByIndex(firstIdx);
-      card.style.top = top+'px';
-      card.style.height = height+'px';
-      card.style.left = 'calc(' + leftPct + '% + 2px)';
-      card.style.width = 'calc(' + widthPct + '% - 4px)';
-      card.dataset.masterId = inst.masterId;
-      card.dataset.date = inst.instanceDate;
+      runs.forEach(([runMin, runMax]) => {
+        const leftPct = (runMin/n*100);
+        const widthPct = ((runMax-runMin+1)/n*100);
 
-      const durationMin = seg.endMin - seg.startMin;
-      const recurMark = inst.isRecurring ? '<span class="ecard-recur-inline">↻</span>' : '';
-      const title = escapeHtml(inst.title || '(未命名行程)');
-      const timeStr = inst.start+' - '+inst.end;
+        const card = document.createElement('div');
+        card.className = 'event-card ' + 'c-' + colByIndex(firstIdx);
+        card.style.top = top+'px';
+        card.style.height = height+'px';
+        card.style.left = 'calc(' + leftPct + '% + 3px)';
+        card.style.width = 'calc(' + widthPct + '% - 6px)';
+        card.dataset.masterId = inst.masterId;
+        card.dataset.date = inst.instanceDate;
 
-      if(durationMin < 15){
-        // 連一行都放不下：整段文字用同一個節點，稍後統一縮字塞進去
-        card.classList.add('tiny');
-        card.innerHTML =
-          '<span class="ecard-solo">'+recurMark+title+' · '+timeStr+'</span>';
-      } else if(durationMin < 45){
-        // 放得下一行，但兩行會被壓縮：標題與時間並排在同一行
-        card.classList.add('compact');
-        card.innerHTML =
-          '<div class="ecard-row">'+
-            '<span class="ecard-title">'+recurMark+title+'</span>'+
-            '<span class="ecard-time">'+timeStr+'</span>'+
-          '</div>';
-      } else {
-        card.innerHTML =
-          (inst.isRecurring ? '<span class="ecard-recur-tag">↻</span>' : '') +
-          '<div class="ecard-title">'+title+'</div>'+
-          '<div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
-      }
+        const durationMin = endMin - startMin;
+        const recurMark = inst.isRecurring ? '<span class="ecard-recur-inline">↻</span>' : '';
+        const title = escapeHtml(inst.title || '(未命名行程)');
+        const timeStr = inst.start+' - '+inst.end;
 
-      attachCardInteractions(card, inst, runMin, runMax);
-      const handle = document.createElement('span');
-      handle.className = 'resize-handle';
-      handle.setAttribute('aria-hidden', 'true');
-      card.appendChild(handle);
-      attachResizeHandle(card, inst, handle, runMin, runMax);
-      eventsLayer.appendChild(card);
-      if(durationMin < 15) fitTinyCardText(card);
+        if(durationMin < 15){
+          // 連一行都放不下：整段文字用同一個節點，稍後統一縮字塞進去
+          card.classList.add('tiny');
+          card.innerHTML =
+            '<span class="ecard-solo">'+recurMark+title+' · '+timeStr+'</span>';
+        } else if(durationMin < 45){
+          // 放得下一行，但兩行會被壓縮：標題與時間並排在同一行
+          card.classList.add('compact');
+          card.innerHTML =
+            '<div class="ecard-row">'+
+              '<span class="ecard-title">'+recurMark+title+'</span>'+
+              '<span class="ecard-time">'+timeStr+'</span>'+
+            '</div>';
+        } else {
+          card.innerHTML =
+            (inst.isRecurring ? '<span class="ecard-recur-tag">↻</span>' : '') +
+            '<div class="ecard-title">'+title+'</div>'+
+            '<div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
+        }
+
+        attachCardInteractions(card, inst, runMin, runMax);
+        const handle = document.createElement('span');
+        handle.className = 'resize-handle';
+        handle.setAttribute('aria-hidden', 'true');
+        card.appendChild(handle);
+        attachResizeHandle(card, inst, handle, runMin, runMax);
+        eventsLayer.appendChild(card);
+        if(durationMin < 15) fitTinyCardText(card);
+      });
     });
   }
 
@@ -1405,51 +1381,39 @@
 
     const layer = document.createElement('div');
     layer.className = 'events-layer';
-    const layout = layoutInstancesForDay(getInstancesForDate(dateStr));
-
-    layout.forEach(entry => {
-      const seg = entry.segment;
-      const inst = seg.inst;
-      const top = seg.startMin/60*50;
-      const height = Math.max(8, (seg.endMin-seg.startMin)/60*50);
-      const durationMin = seg.endMin - seg.startMin;
-
-      let leftPct, widthPct;
-      if(entry.trackCount){
-        const clusterSpanCols = entry.clusterColMax - entry.clusterColMin + 1;
-        const laneWidthCols = clusterSpanCols / entry.trackCount;
-        const leftCols = entry.clusterColMin + entry.track*laneWidthCols;
-        leftPct = leftCols/n*100;
-        widthPct = laneWidthCols/n*100;
-      } else {
-        leftPct = entry.colMin/n*100;
-        widthPct = (entry.colMax-entry.colMin+1)/n*100;
-      }
-
-      const firstIdx = eventColRuns(inst)[0][0];
+    getInstancesForDate(dateStr).forEach(inst => {
+      const startMin = timeToMinutes(inst.start);
+      const endMin = timeToMinutes(inst.end);
+      const top = startMin/60*50;
+      const height = Math.max(8, (endMin-startMin)/60*50);
+      const durationMin = endMin-startMin;
+      const runs = eventColRuns(inst);
+      const firstIdx = runs[0][0];
       const names = (inst.participants||[])
         .map(pid => { const c = columns.find(x=>x.id===pid); return c ? c.name : null; })
         .filter(Boolean).join('、');
       const title = escapeHtml(inst.title||'(未命名行程)');
       const timeStr = inst.start+' - '+inst.end;
 
-      const card = document.createElement('div');
-      card.className = 'event-card c-'+colByIndex(firstIdx);
-      card.style.top = top+'px';
-      card.style.height = height+'px';
-      card.style.left = 'calc(' + leftPct + '% + 2px)';
-      card.style.width = 'calc(' + widthPct + '% - 4px)';
-      if(durationMin < 15){
-        card.classList.add('tiny');
-        card.innerHTML = '<span class="ecard-solo">'+title+' · '+timeStr+'</span>';
-      } else if(durationMin < 45){
-        card.classList.add('compact');
-        card.innerHTML = '<div class="ecard-row"><span class="ecard-title">'+title+'</span><span class="ecard-time">'+timeStr+'</span></div>';
-      } else {
-        card.innerHTML = '<div class="ecard-title">'+title+'</div><div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
-      }
-      layer.appendChild(card);
-      if(durationMin < 15) fitTinyCardText(card);
+      runs.forEach(([runMin, runMax]) => {
+        const card = document.createElement('div');
+        card.className = 'event-card c-'+colByIndex(firstIdx);
+        card.style.top = top+'px';
+        card.style.height = height+'px';
+        card.style.left = 'calc(' + (runMin/n*100) + '% + 3px)';
+        card.style.width = 'calc(' + ((runMax-runMin+1)/n*100) + '% - 6px)';
+        if(durationMin < 15){
+          card.classList.add('tiny');
+          card.innerHTML = '<span class="ecard-solo">'+title+' · '+timeStr+'</span>';
+        } else if(durationMin < 45){
+          card.classList.add('compact');
+          card.innerHTML = '<div class="ecard-row"><span class="ecard-title">'+title+'</span><span class="ecard-time">'+timeStr+'</span></div>';
+        } else {
+          card.innerHTML = '<div class="ecard-title">'+title+'</div><div class="ecard-time">'+timeStr+(names ? ' · '+escapeHtml(names) : '')+'</div>';
+        }
+        layer.appendChild(card);
+        if(durationMin < 15) fitTinyCardText(card);
+      });
     });
     panel.appendChild(layer);
     return panel;
@@ -2078,11 +2042,14 @@
     renderTimeline();
   });
 
-  /* ---------------- 編輯頁：欄位連動 ---------------- */
+  /* ---------------- 編輯頁：欄位與三欄時間連動 ---------------- */
   const pageTimeline = document.getElementById('page-timeline');
   const pageEdit = document.getElementById('page-edit');
   const fieldTitle = document.getElementById('fieldTitle');
   const fieldDate = document.getElementById('fieldDate');
+  const fieldStart = document.getElementById('fieldStart');
+  const fieldEnd = document.getElementById('fieldEnd');
+  const fieldDuration = document.getElementById('fieldDuration');
   const fieldNotes = document.getElementById('fieldNotes');
   const participantsBox = document.getElementById('participantsBox');
   const weekdayBox = document.getElementById('weekdayBox');
@@ -2133,9 +2100,34 @@
     fieldTitle.value = data.title || '';
     fieldDate.value = dateStr;
     fieldDate.disabled = !!isRecurring; // 重複行程的個別日期由「重複」規則決定，這裡不能單獨改
+    fieldStart.value = data.start;
+    fieldEnd.value = data.end;
+    fieldDuration.value = timeToMinutes(data.end) - timeToMinutes(data.start);
     fieldNotes.value = data.notes || '';
     renderParticipantChips(data.participants && data.participants.length ? data.participants : [columns[0].id]);
   }
+
+  fieldStart.addEventListener('input', function(){
+    if(!fieldStart.value) return;
+    if(fieldDuration.value){
+      fieldEnd.value = minutesToTime(timeToMinutes(fieldStart.value) + Number(fieldDuration.value));
+    } else if(fieldEnd.value){
+      fieldDuration.value = Math.max(5, timeToMinutes(fieldEnd.value) - timeToMinutes(fieldStart.value));
+    }
+  });
+
+  fieldEnd.addEventListener('input', function(){
+    if(!fieldEnd.value) return;
+    if(fieldStart.value){
+      fieldDuration.value = Math.max(5, timeToMinutes(fieldEnd.value) - timeToMinutes(fieldStart.value));
+    }
+  });
+
+  fieldDuration.addEventListener('input', function(){
+    if(fieldDuration.value && fieldStart.value){
+      fieldEnd.value = minutesToTime(timeToMinutes(fieldStart.value) + Number(fieldDuration.value));
+    }
+  });
 
   /* ---------------- 開啟／關閉編輯頁（SPA + History API） ----------------
      注意：某些內嵌預覽環境（例如聊天工具的沙盒 iframe）會擋掉
@@ -2219,13 +2211,14 @@
     const newNotes = fieldNotes.value;
     const newParticipants = selectedParticipants.size ? Array.from(selectedParticipants) : [columns[0].id];
 
-    // 時間欄位已經移除了，編輯頁不會改動時間——沿用這個行程目前實際的時間
-    // （只能透過時間表上的拖曳/縮放調整）
-    const curInst = getInstancesForDate(editingInstanceDate).find(
-      i => i.masterId === editingMasterId && i.instanceDate === editingInstanceDate
-    );
-    const newStart = curInst ? curInst.start : master.start;
-    const newEnd = curInst ? curInst.end : master.end;
+    let s = fieldStart.value || master.start;
+    let en = fieldEnd.value;
+    let dur = fieldDuration.value;
+    if(en && timeToMinutes(en) <= timeToMinutes(s) && dur){
+      en = minutesToTime(timeToMinutes(s) + Number(dur));
+    }
+    const newStart = s;
+    const newEnd = en || minutesToTime(timeToMinutes(s) + Number(dur||60));
 
     const newWeekdays = Array.from(selectedWeekdays).sort((a,b)=>a-b);
     const wasRecurring = !!master.recurrence;
