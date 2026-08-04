@@ -1878,7 +1878,7 @@
   // 是拖曳的固定端（手指最初按下的位置），只有「正在延伸」的那一端會被
   // 夾住，夾到剛好碰到既有行程的邊界為止；如果夾到完全沒有空間，回傳
   // 一個高度為 0 的範圍，代表這裡放不下、不能建立。
-  function clampSelectionAgainstCollisions(top, bottom, colMin, colMax, anchorPx, anchorColIdx){
+  function clampSelectionAgainstCollisions(top, bottom, colMin, colMax, growingDown, growingRight){
     const insts = getInstancesForDate(currentDate);
     const blockers = [];
     insts.forEach(inst => {
@@ -1893,24 +1893,24 @@
     if(blockers.length === 0) return {top, bottom, colMin, colMax};
 
     let newTop = top, newBottom = bottom;
-    if(Math.abs(anchorPx - top) <= 0.6){
-      // anchor 在上緣，往下延伸 → 夾住 bottom
-      const limits = blockers.map(b => b.iTop).filter(v => v >= anchorPx - 0.01);
+    if(growingDown){
+      // 上緣固定，往下延伸 → 夾住 bottom
+      const limits = blockers.map(b => b.iTop).filter(v => v >= top - 0.01);
       if(limits.length) newBottom = Math.min(newBottom, Math.min(...limits));
     } else {
-      // anchor 在下緣，往上延伸 → 夾住 top
-      const limits = blockers.map(b => b.iBottom).filter(v => v <= anchorPx + 0.01);
+      // 下緣固定，往上延伸 → 夾住 top
+      const limits = blockers.map(b => b.iBottom).filter(v => v <= bottom + 0.01);
       if(limits.length) newTop = Math.max(newTop, Math.max(...limits));
     }
 
     let newColMin = colMin, newColMax = colMax;
     const stillBlocking = blockers.filter(b => newTop < b.iBottom && b.iTop < newBottom);
     if(stillBlocking.length){
-      if(anchorColIdx <= colMin){
-        const limits = stillBlocking.map(b => b.runMin - 1).filter(v => v >= anchorColIdx);
+      if(growingRight){
+        const limits = stillBlocking.map(b => b.runMin - 1).filter(v => v >= colMin);
         if(limits.length) newColMax = Math.min(newColMax, Math.min(...limits));
       } else {
-        const limits = stillBlocking.map(b => b.runMax + 1).filter(v => v <= anchorColIdx);
+        const limits = stillBlocking.map(b => b.runMax + 1).filter(v => v <= colMax);
         if(limits.length) newColMin = Math.max(newColMin, Math.max(...limits));
       }
     }
@@ -2014,8 +2014,10 @@
       const curColIdx = colIdxFromX(e.clientX);
       const colMin = Math.min(anchorColIdx, curColIdx);
       const colMax = Math.max(anchorColIdx, curColIdx);
+      const growingDown = curPx >= anchorPx;
+      const growingRight = curColIdx >= anchorColIdx;
 
-      const clamped = clampSelectionAgainstCollisions(top, bottom, colMin, colMax, anchorPx, anchorColIdx);
+      const clamped = clampSelectionAgainstCollisions(top, bottom, colMin, colMax, growingDown, growingRight);
       paintSelectionBox(clamped.top, clamped.bottom, clamped.colMin, clamped.colMax);
     }
 
@@ -2070,7 +2072,7 @@
         if(navigator.vibrate) navigator.vibrate(15);
         let top = Math.max(0, snap25(anchorPx));
         let bottom = Math.min(1200, top + 50); // 預設長按不拖曳＝1小時
-        const clamped = clampSelectionAgainstCollisions(top, bottom, anchorColIdx, anchorColIdx, anchorPx, anchorColIdx);
+        const clamped = clampSelectionAgainstCollisions(top, bottom, anchorColIdx, anchorColIdx, true, true);
         paintSelectionBox(clamped.top, clamped.bottom, clamped.colMin, clamped.colMax);
       }, 400);
 
