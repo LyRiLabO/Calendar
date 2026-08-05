@@ -88,62 +88,56 @@
     z-index:3;
   }
   .date-center-nav{
-    display:flex; align-items:center; justify-content:center; gap:18px;
-  }
-  .header-row-bottom{
-    display:flex; justify-content:flex-end;
-  }
-  .date-center-nav button{
-    width:32px; height:32px;
-    border-radius:50%;
-    border:1px solid var(--line);
-    background:var(--card);
-    color:var(--ink-soft);
-    font-size:16px;
+    position:relative;
     display:flex; align-items:center; justify-content:center;
-    cursor:pointer;
-    flex:0 0 auto;
+    min-height:44px;
   }
-  .date-center-nav button:active{background:var(--paper-deep);}
   .add-col-btn{
-    margin-left:10px;
-    padding:8px 12px;
-    border-radius:16px;
+    position:absolute;
+    right:0; top:50%;
+    transform:translateY(-50%);
+    padding:10px 14px;
+    border-radius:14px;
     border:1.5px solid var(--ink);
     background:var(--ink);
     color:var(--paper);
-    font-family:'Noto Sans TC', sans-serif;
-    font-size:12.5px;
-    font-weight:700;
-    white-space:nowrap;
-    cursor:pointer;
     display:flex;
     align-items:center;
-    gap:6px;
+    justify-content:center;
+    cursor:pointer;
+    flex:0 0 auto;
   }
   .add-col-btn svg{flex:0 0 auto;}
   .add-col-btn:active{opacity:.8;}
   .date-display{
     position:relative;
-    display:flex; flex-direction:column; align-items:center; gap:2px;
     text-align:center;
-    min-width:130px;
-    padding:2px 4px;
+    min-width:150px;
+    padding:5px 14px;
+    /* 白色實心底板，襯出「嵌在螢幕裡」的感覺 */
+    background:#FFFFFF;
+    border-radius:10px;
+    border:2px solid transparent; /* 預留邊框粗細，是今天時只換顏色，不會因為邊框出現/消失而跳動 */
+    box-shadow:inset 0 1px 4px rgba(32,38,58,0.18), 0 1px 0 rgba(255,255,255,0.6);
+    overflow:hidden;
   }
-  .today-badge{
-    display:inline-block;
-    font-family:'JetBrains Mono', monospace;
-    font-size:9.5px;
-    font-weight:700;
-    letter-spacing:.1em;
-    color:var(--red-deep);
-    background:rgba(178,58,47,0.1);
-    border:1px solid var(--red);
-    border-radius:8px;
-    padding:1.5px 8px;
-    margin-bottom:1px;
+  .date-display.is-today{
+    border-color:var(--red);
   }
-  .today-badge.badge-hidden{ visibility:hidden; }
+  .date-content{
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    width:100%;
+  }
+  .date-content-preview{
+    position:absolute;
+    top:6px; left:14px; right:14px;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    pointer-events:none;
+  }
+  .date-display.animating .date-content,
+  .date-display.animating .date-content-preview{
+    transition:transform .3s cubic-bezier(.2,.7,.3,1);
+  }
   .date-display .weekday{
     display:block;
     font-family:'JetBrains Mono', monospace;
@@ -600,7 +594,8 @@
     width:100%;
   }
   .field input:focus-visible,
-  .field textarea:focus-visible{
+  .field textarea:focus-visible,
+  .time-trio input:focus-visible{
     outline:none;
     border-bottom-color:var(--red);
   }
@@ -613,6 +608,60 @@
     border-radius:8px;
     padding:12px;
     background:var(--card);
+  }
+
+  .ticket{
+    display:flex;
+    background:var(--card);
+    border-radius:12px;
+    box-shadow:0 2px 8px var(--shadow);
+    position:relative;
+    overflow:visible;
+  }
+  .ticket::before, .ticket::after{
+    content:"";
+    position:absolute;
+    top:50%; transform:translateY(-50%);
+    width:16px; height:16px;
+    background:var(--paper);
+    border-radius:50%;
+  }
+  .ticket::before{left:-8px;}
+  .ticket::after{right:-8px;}
+  .time-trio{
+    display:flex;
+    width:100%;
+    padding:14px 16px;
+  }
+  .time-trio .tcell{
+    flex:1;
+    display:flex; flex-direction:column; gap:6px;
+    position:relative;
+  }
+  .time-trio .tcell + .tcell{
+    margin-left:12px;
+    padding-left:12px;
+    border-left:1px dashed var(--line);
+  }
+  .time-trio label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:9px;
+    letter-spacing:.08em;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+  }
+  .time-trio input{
+    border:none;
+    background:transparent;
+    font-family:'JetBrains Mono', monospace;
+    font-weight:700;
+    font-size:15px;
+    color:var(--ink);
+    padding:2px 0;
+    width:100%;
+  }
+  .time-trio input[type=number]{
+    -moz-appearance:textfield;
   }
 
   .delete-btn{
@@ -681,20 +730,39 @@
   }
 
   .sync-toggle{
-    display:flex; align-items:center; gap:10px;
-    padding:13px 14px;
-    border-radius:10px;
-    border:1px dashed var(--line);
-    background:var(--card);
+    display:flex; align-items:center; gap:9px;
     font-family:'Noto Sans TC', sans-serif;
-    font-size:13.5px;
+    font-size:16px;
     font-weight:700;
     color:var(--ink-soft);
     cursor:pointer;
   }
   .sync-toggle input{
-    width:18px; height:18px;
-    accent-color: var(--red);
+    display:none; /* 用視覺化的 toggle-switch 取代原生 checkbox 外觀 */
+  }
+  .toggle-switch{
+    position:relative;
+    width:36px; height:20px;
+    border-radius:11px;
+    background:var(--line);
+    flex:0 0 auto;
+    transition:background .18s ease;
+  }
+  .toggle-switch::after{
+    content:"";
+    position:absolute;
+    top:2px; left:2px;
+    width:16px; height:16px;
+    border-radius:50%;
+    background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.25);
+    transition:transform .18s ease;
+  }
+  .sync-toggle input:checked + .toggle-switch{
+    background:var(--red);
+  }
+  .sync-toggle input:checked + .toggle-switch::after{
+    transform:translateX(16px);
   }
 
   .field input[type=date]:disabled{
@@ -734,26 +802,22 @@
   <section id="page-timeline" class="page active">
     <header class="planner-header">
       <div class="date-center-nav">
-        <button id="prevDay" aria-label="前一天">‹</button>
         <div class="date-display" id="dateDisplayBtn">
-          <span class="today-badge" id="todayBadge">今天</span>
-          <span class="weekday" id="weekdayLabel">—</span>
-          <span class="date-num" id="dateLabel">—</span>
+          <div class="date-content" id="dateContentCurrent">
+            <span class="weekday" id="weekdayLabel">—</span>
+            <span class="date-num" id="dateLabel">—</span>
+          </div>
           <input type="date" id="datePicker" class="date-picker-input" aria-label="選擇日期">
         </div>
-        <button id="nextDay" aria-label="後一天">›</button>
-      </div>
-      <div class="header-row-bottom">
         <button id="btnAddColumn" class="add-col-btn" aria-label="新增使用者欄位">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <g transform="scale(-1,1) translate(-24,0)">
+          <svg width="23" height="18" viewBox="0 0 30 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <g transform="scale(-1,1) translate(-30,0)">
               <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
               <circle cx="8.5" cy="7" r="4"/>
-              <line x1="20" y1="8" x2="20" y2="14"/>
-              <line x1="23" y1="11" x2="17" y2="11"/>
+              <line x1="23" y1="7" x2="23" y2="17"/>
+              <line x1="18" y1="12" x2="28" y2="12"/>
             </g>
           </svg>
-          <span>新增</span>
         </button>
       </div>
     </header>
@@ -806,6 +870,26 @@
       </div>
 
       <div class="field">
+        <span class="field-label">時間設定</span>
+        <div class="ticket">
+          <div class="time-trio">
+            <div class="tcell">
+              <label for="fieldStart">開始時間</label>
+              <input id="fieldStart" type="time" step="900">
+            </div>
+            <div class="tcell">
+              <label for="fieldEnd">結束時間</label>
+              <input id="fieldEnd" type="time" step="900">
+            </div>
+            <div class="tcell">
+              <label for="fieldDuration">所需分鐘</label>
+              <input id="fieldDuration" type="number" min="15" step="15" inputmode="numeric">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
         <span class="field-label">重複</span>
         <div class="weekday-box" id="weekdayBox"></div>
       </div>
@@ -813,7 +897,8 @@
       <div class="field" id="syncField" style="display:none;">
         <label class="sync-toggle">
           <input type="checkbox" id="fieldSyncEdit">
-          <span>同步編輯整個重複系列</span>
+          <span class="toggle-switch" aria-hidden="true"></span>
+          <span>同步編輯</span>
         </label>
       </div>
 
@@ -1144,8 +1229,9 @@
   const columnHeaderRow = document.getElementById('columnHeaderRow');
   const weekdayLabel = document.getElementById('weekdayLabel');
   const dateLabel = document.getElementById('dateLabel');
-  const todayBadge = document.getElementById('todayBadge');
   const datePicker = document.getElementById('datePicker');
+  const dateDisplayBtn = document.getElementById('dateDisplayBtn');
+  const dateContentCurrent = document.getElementById('dateContentCurrent');
 
   function renderColumnHeader(){
     columnHeaderRow.innerHTML = '';
@@ -1186,7 +1272,7 @@
     const dt = new Date(y, m-1, d);
     weekdayLabel.textContent = (y)+'年';
     dateLabel.textContent = m+'月'+d+'日 · '+WEEKDAYS[dt.getDay()];
-    todayBadge.style.visibility = (currentDate === todayStr()) ? 'visible' : 'hidden';
+    dateDisplayBtn.classList.toggle('is-today', currentDate === todayStr());
     if(datePicker.value !== currentDate) datePicker.value = currentDate;
   }
 
@@ -1402,6 +1488,7 @@
     timelineGrid.style.transform = 'translateX(' + clamped + 'px)';
     const base = direction === 'next' ? w : -w;
     previewPanel.style.transform = 'translateX(' + (base + clamped) + 'px)';
+    updateDateScreenSlide(dx, w);
   }
 
   // 放開手指：滑動幅度夠大就用動畫接續滑完、真的切換日期；不夠就彈回原位
@@ -1410,6 +1497,7 @@
     const threshold = w * 0.28;
     const commit = Math.abs(dx) > threshold && previewPanel;
     daySlider.classList.add('animating');
+    endDateScreenSlide(commit, dx < 0 ? 'next' : 'prev');
 
     if(commit){
       const delta = dx < 0 ? 1 : -1;
@@ -1436,21 +1524,91 @@
     }
   }
 
+  /* ---------------- 頂部日期螢幕：跟著滑動手勢做「等比例」的同步捲動 ----------------
+     不是像素對像素同步移動，而是進度對進度：主畫面滑動的進度（目前位移
+     ÷ 整個畫面寬度）走到多少百分比，日期螢幕裡的文字也走到自己可移動
+     範圍（螢幕自己的寬度）的同樣百分比，兩邊會在「進度 100%」那一刻
+     同時到達終點——因為日期螢幕比主畫面窄很多，實際移動的像素會少很多、
+     看起來也比較慢，但不會慢半拍或搶拍，是同時完成。 */
+  let dateScreenPreviewEl = null;
+  let dateScreenPreviewDir = null;
+
+  function ensureDateScreenPreview(direction){
+    if(dateScreenPreviewEl && dateScreenPreviewDir === direction) return dateScreenPreviewEl;
+    if(dateScreenPreviewEl){ dateScreenPreviewEl.remove(); dateScreenPreviewEl = null; }
+    dateScreenPreviewDir = direction;
+    const targetDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
+    const [y,m,d] = targetDate.split('-').map(Number);
+    const dt = new Date(y, m-1, d);
+    const el = document.createElement('div');
+    el.className = 'date-content-preview';
+    el.innerHTML =
+      '<span class="weekday">' + y + '年</span>' +
+      '<span class="date-num">' + m + '月' + d + '日 · ' + WEEKDAYS[dt.getDay()] + '</span>';
+    // 一定要先設定「螢幕外」的起始位置，之後的動畫才是從這裡滑進來，
+    // 不然元素一創建就停在最終位置（translateX(0)），動畫只剩終點、
+    // 沒有起點，看起來就會像是原地突然冒出來。
+    const screenW = dateDisplayBtn.clientWidth || 1;
+    el.style.transform = 'translateX(' + (direction === 'next' ? screenW : -screenW) + 'px)';
+    dateDisplayBtn.appendChild(el);
+    dateScreenPreviewEl = el;
+    return el;
+  }
+
+  function updateDateScreenSlide(dx, pageWidth){
+    const progress = Math.max(-1, Math.min(1, dx / pageWidth));
+    const direction = dx < 0 ? 'next' : 'prev';
+    const preview = ensureDateScreenPreview(direction);
+    const screenW = dateDisplayBtn.clientWidth || 1;
+    const travel = progress * screenW;
+    dateContentCurrent.style.transform = 'translateX(' + travel + 'px)';
+    const base = direction === 'next' ? screenW : -screenW;
+    preview.style.transform = 'translateX(' + (base + travel) + 'px)';
+  }
+
+  function endDateScreenSlide(commit, direction){
+    const screenW = dateDisplayBtn.clientWidth || 1;
+    dateDisplayBtn.classList.add('animating');
+    if(commit){
+      dateContentCurrent.style.transform = 'translateX(' + (direction === 'next' ? -screenW : screenW) + 'px)';
+      if(dateScreenPreviewEl) dateScreenPreviewEl.style.transform = 'translateX(0px)';
+    } else {
+      dateContentCurrent.style.transform = 'translateX(0px)';
+      if(dateScreenPreviewEl){
+        const base = dateScreenPreviewDir === 'next' ? screenW : -screenW;
+        dateScreenPreviewEl.style.transform = 'translateX(' + base + 'px)';
+      }
+    }
+    setTimeout(function(){
+      dateDisplayBtn.classList.remove('animating');
+      if(dateScreenPreviewEl){ dateScreenPreviewEl.remove(); dateScreenPreviewEl = null; dateScreenPreviewDir = null; }
+      dateContentCurrent.style.transform = '';
+    }, 300);
+  }
+
   // 立即觸發完成一次日期切換的滑動動畫（給「拖曳行程到畫面邊緣」用，
   // 不是使用者手動滑出來的位移，是碰到邊緣就自動觸發一次完整轉場）。
   function animateCommitDaySlide(direction, onDone){
     const w = daySlider.clientWidth || 1;
     ensurePreviewPanel(direction);
+    const dateScreenPreview = ensureDateScreenPreview(direction);
+    const screenW = dateDisplayBtn.clientWidth || 1;
     daySlider.classList.add('animating');
+    dateDisplayBtn.classList.add('animating');
     requestAnimationFrame(function(){
       timelineGrid.style.transform = 'translateX(' + (direction === 'next' ? -w : w) + 'px)';
       previewPanel.style.transform = 'translateX(0px)';
+      dateContentCurrent.style.transform = 'translateX(' + (direction === 'next' ? -screenW : screenW) + 'px)';
+      dateScreenPreview.style.transform = 'translateX(0px)';
     });
     setTimeout(function(){
       daySlider.classList.remove('animating');
+      dateDisplayBtn.classList.remove('animating');
       currentDate = dateByOffset(currentDate, direction === 'next' ? 1 : -1);
       if(previewPanel){ previewPanel.remove(); previewPanel = null; }
+      if(dateScreenPreviewEl){ dateScreenPreviewEl.remove(); dateScreenPreviewEl = null; dateScreenPreviewDir = null; }
       timelineGrid.style.transform = '';
+      dateContentCurrent.style.transform = '';
       renderTimeline();
       if(onDone) onDone();
     }, 300);
@@ -2116,16 +2274,6 @@
     renderEvents(); // 欄位數變了，行程的寬度/位置要重新計算
   });
 
-  /* ---------------- 日期切換 ---------------- */
-  function shiftDate(delta){
-    const [y,m,d] = currentDate.split('-').map(Number);
-    const dt = new Date(y, m-1, d + delta);
-    currentDate = dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());
-    renderTimeline();
-  }
-  document.getElementById('prevDay').addEventListener('click', ()=>shiftDate(-1));
-  document.getElementById('nextDay').addEventListener('click', ()=>shiftDate(1));
-
   datePicker.addEventListener('change', function(){
     if(!datePicker.value) return;
     currentDate = datePicker.value;
@@ -2137,6 +2285,9 @@
   const pageEdit = document.getElementById('page-edit');
   const fieldTitle = document.getElementById('fieldTitle');
   const fieldDate = document.getElementById('fieldDate');
+  const fieldStart = document.getElementById('fieldStart');
+  const fieldEnd = document.getElementById('fieldEnd');
+  const fieldDuration = document.getElementById('fieldDuration');
   const fieldNotes = document.getElementById('fieldNotes');
   const participantsBox = document.getElementById('participantsBox');
   const weekdayBox = document.getElementById('weekdayBox');
@@ -2187,9 +2338,34 @@
     fieldTitle.value = data.title || '';
     fieldDate.value = dateStr;
     fieldDate.disabled = !!isRecurring; // 重複行程的個別日期由「重複」規則決定，這裡不能單獨改
+    fieldStart.value = data.start;
+    fieldEnd.value = data.end;
+    fieldDuration.value = timeToMinutes(data.end) - timeToMinutes(data.start);
     fieldNotes.value = data.notes || '';
     renderParticipantChips(data.participants && data.participants.length ? data.participants : [columns[0].id]);
   }
+
+  fieldStart.addEventListener('input', function(){
+    if(!fieldStart.value) return;
+    if(fieldDuration.value){
+      fieldEnd.value = minutesToTime(timeToMinutes(fieldStart.value) + Number(fieldDuration.value));
+    } else if(fieldEnd.value){
+      fieldDuration.value = Math.max(5, timeToMinutes(fieldEnd.value) - timeToMinutes(fieldStart.value));
+    }
+  });
+
+  fieldEnd.addEventListener('input', function(){
+    if(!fieldEnd.value) return;
+    if(fieldStart.value){
+      fieldDuration.value = Math.max(5, timeToMinutes(fieldEnd.value) - timeToMinutes(fieldStart.value));
+    }
+  });
+
+  fieldDuration.addEventListener('input', function(){
+    if(fieldDuration.value && fieldStart.value){
+      fieldEnd.value = minutesToTime(timeToMinutes(fieldStart.value) + Number(fieldDuration.value));
+    }
+  });
 
   /* ---------------- 開啟／關閉編輯頁（SPA + History API） ----------------
      注意：某些內嵌預覽環境（例如聊天工具的沙盒 iframe）會擋掉
@@ -2273,13 +2449,15 @@
     const newNotes = fieldNotes.value;
     const newParticipants = selectedParticipants.size ? Array.from(selectedParticipants) : [columns[0].id];
 
-    // 時間欄位已經移除了，編輯頁不會改動時間——沿用這個行程目前實際的時間
-    // （只能透過時間表上的拖曳/縮放調整）
-    const curInst = getInstancesForDate(editingInstanceDate).find(
-      i => i.masterId === editingMasterId && i.instanceDate === editingInstanceDate
-    );
-    const newStart = curInst ? curInst.start : master.start;
-    const newEnd = curInst ? curInst.end : master.end;
+    // 時間欄位改回從編輯頁讀取
+    let s = fieldStart.value || master.start;
+    let en = fieldEnd.value;
+    let dur = fieldDuration.value;
+    if(en && timeToMinutes(en) <= timeToMinutes(s) && dur){
+      en = minutesToTime(timeToMinutes(s) + Number(dur));
+    }
+    const newStart = s;
+    const newEnd = en || minutesToTime(timeToMinutes(s) + Number(dur||60));
 
     const newWeekdays = Array.from(selectedWeekdays).sort((a,b)=>a-b);
     const wasRecurring = !!master.recurrence;
