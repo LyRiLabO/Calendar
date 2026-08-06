@@ -96,8 +96,8 @@
     position:absolute;
     right:0; top:50%;
     transform:translateY(-50%);
-    padding:10px 14px;
-    border-radius:14px;
+    padding:7px 10px;
+    border-radius:10px;
     border:1.5px solid var(--ink);
     background:var(--ink);
     color:var(--paper);
@@ -109,6 +109,60 @@
   }
   .add-col-btn svg{flex:0 0 auto;}
   .add-col-btn:active{opacity:.8;}
+  /* 「選取」控制項：跟右側新增共編者按鍵左右對稱（left:0 對 right:0，
+     同樣的 top:50% + translateY(-50%) 垂直置中），viewport 邊界間距一致。
+     內含「選取／×」切換鍵本身，以及只有在選取狀態下才出現的垃圾桶鍵。
+     造型先跟新增共編者按鍵同款（黑色圓角長方形），之後再依需求微調。 */
+  .select-controls{
+    position:absolute;
+    left:0; top:50%;
+    transform:translateY(-50%);
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex:0 0 auto;
+  }
+  .select-toggle-btn{
+    padding:7px 14px;
+    border-radius:10px;
+    border:1.5px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    font-family:'Noto Sans TC', sans-serif;
+    font-size:12.5px;
+    font-weight:700;
+    letter-spacing:.02em;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    flex:0 0 auto;
+  }
+  .select-toggle-btn:active{opacity:.8;}
+  .select-toggle-btn.active{
+    background:var(--red);
+    border-color:var(--red);
+  }
+  .select-delete-btn{
+    padding:7px 10px;
+    border-radius:10px;
+    border:1.5px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    flex:0 0 auto;
+  }
+  .select-delete-btn svg{flex:0 0 auto;}
+  .select-delete-btn:active{opacity:.8;}
+  .select-delete-btn[hidden]{display:none;}
+  #phone.select-mode-active .fab,
+  #phone.select-mode-active .add-col-btn{
+    display:none;
+  }
   .date-display{
     position:relative;
     text-align:center;
@@ -293,6 +347,22 @@
   .event-card.c-sage .resize-handle::after{background:var(--sage);}
   .event-card.c-dusk .resize-handle::after{background:var(--dusk);}
   .event-card.c-blush .resize-handle::after{background:var(--blush);}
+  /* 選取狀態：拖曳圓點收起（避免跟選取手勢打架），
+     已選取的行程整張卡片變灰，沒有權限選取的行程則半透明淡出、無法點擊。 */
+  .event-card.select-mode .resize-handle{display:none;}
+  .event-card.select-picked{
+    background:#CBCDD4 !important;
+    border-left-color:#8A8FA0 !important;
+  }
+  .event-card.select-picked .ecard-title,
+  .event-card.select-picked .ecard-time,
+  .event-card.select-picked .ecard-solo{
+    color:#4B5066;
+  }
+  .event-card.select-locked{
+    opacity:.4;
+    cursor:not-allowed;
+  }
   .event-card.dragging{
     transform:scale(1.04);
     box-shadow:0 10px 26px var(--shadow);
@@ -511,6 +581,23 @@
   .col-head.col-dusk .col-dot{background:var(--dusk);}
   .col-head.col-blush .col-dot{background:var(--blush);}
 
+  /* 選取狀態下，欄位標題也是可點擊的選取對象：自己的欄位可以點擊圈選，
+     別人的欄位變半透明表示不可操作；圈選後整欄（含標題）都會出現灰底。 */
+  .col-head.select-pickable{cursor:pointer;}
+  .col-head.select-locked{opacity:.4; cursor:not-allowed;}
+  .col-head.select-picked{
+    background:rgba(91,97,120,0.22);
+    border-radius:8px;
+  }
+  .col-head.select-picked .col-name{color:var(--ink-soft);}
+  /* 整欄由上到下的灰底，畫在 col-dividers 這層（在格線之上、行程卡之下） */
+  .col-select-band{
+    position:absolute;
+    top:0; bottom:0;
+    background:rgba(91,97,120,0.16);
+    pointer-events:none;
+  }
+
   .col-dividers{
     position:absolute;
     inset:0;
@@ -531,6 +618,7 @@
     left:58px; right:14px; top:14px;
     font-size:11px; color:var(--ink-faint);
     font-family:'JetBrains Mono', monospace;
+    text-align:center;
     pointer-events:none;
   }
 
@@ -802,6 +890,20 @@
   <section id="page-timeline" class="page active">
     <header class="planner-header">
       <div class="date-center-nav">
+        <div class="select-controls" id="selectControls">
+          <button id="btnSelectToggle" class="select-toggle-btn" aria-label="選取">
+            <span id="selectToggleIcon">選取</span>
+          </button>
+          <button id="btnDeleteSelected" class="select-delete-btn" aria-label="刪除已選取的項目" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+              <path d="M10 11v6"></path>
+              <path d="M14 11v6"></path>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+            </svg>
+          </button>
+        </div>
         <div class="date-display" id="dateDisplayBtn">
           <div class="date-content" id="dateContentCurrent">
             <span class="weekday" id="weekdayLabel">—</span>
@@ -875,15 +977,15 @@
           <div class="time-trio">
             <div class="tcell">
               <label for="fieldStart">開始時間</label>
-              <input id="fieldStart" type="time" step="900">
+              <input id="fieldStart" type="time" step="300">
             </div>
             <div class="tcell">
               <label for="fieldEnd">結束時間</label>
-              <input id="fieldEnd" type="time" step="900">
+              <input id="fieldEnd" type="time" step="300">
             </div>
             <div class="tcell">
               <label for="fieldDuration">所需分鐘</label>
-              <input id="fieldDuration" type="number" min="15" step="15" inputmode="numeric">
+              <input id="fieldDuration" type="number" min="5" step="5" inputmode="numeric">
             </div>
           </div>
         </div>
@@ -940,10 +1042,18 @@
     {id:'p1', name:'我'}
   ];
 
+  // 目前這台裝置的操作者是誰：整個 App 現在還沒有登入／切換使用者的機制，
+  // 一律視為 columns[0]（id 'p1'，也就是「我」）本人在操作這台裝置。
+  // 「選取」功能的權限判斷（自己的欄位／自己欄位上的行程可以選取刪除，
+  // 共同行程只有創建者可以選取刪除）都是以這個常數為準。未來如果加上
+  // 真正的多裝置登入機制，只要讓這個值改成「目前登入者的 column id」即可，
+  // 其餘判斷邏輯不需要更動。
+  const CURRENT_USER_ID = 'p1';
+
   let events = [
-    {id:'e1', title:'晨間會議', date:T0, start:'09:00', end:'10:30', notes:'記得帶筆電與投影線材。', participants:['p1']},
-    {id:'e2', title:'研究冰淇淋機', date:T0, start:'14:00', end:'15:00', notes:'客廳桌上製作，不准上床。', participants:['p1']},
-    {id:'e3', title:'健身房', date:T0, start:'19:00', end:'20:00', notes:'', participants:['p1']}
+    {id:'e1', title:'晨間會議', date:T0, start:'09:00', end:'10:30', notes:'記得帶筆電與投影線材。', participants:['p1'], creatorId:'p1'},
+    {id:'e2', title:'研究冰淇淋機', date:T0, start:'14:00', end:'15:00', notes:'客廳桌上製作，不准上床。', participants:['p1'], creatorId:'p1'},
+    {id:'e3', title:'健身房', date:T0, start:'19:00', end:'20:00', notes:'', participants:['p1'], creatorId:'p1'}
   ];
 
   /* ---------------- 本機儲存（重新整理、關掉分頁再打開，資料還在） ----------------
@@ -1062,6 +1172,9 @@
   function getInstancesForDate(dateStr){
     const list = [];
     events.forEach(ev => {
+      // 舊資料（此功能上線前建立的行程）可能沒有 creatorId 欄位，
+      // 一律當作是「我」建立的，避免既有行程突然變成「不能選取刪除」。
+      const creatorId = ev.creatorId || CURRENT_USER_ID;
       if(ev.recurrence){
         const excluded = ev.excluded || [];
         if(dateStr >= ev.date &&
@@ -1076,6 +1189,7 @@
             end: ov.end !== undefined ? ov.end : ev.end,
             notes: ov.notes !== undefined ? ov.notes : ev.notes,
             participants: ov.participants !== undefined ? ov.participants : ev.participants,
+            creatorId: creatorId,
             isRecurring: true,
             hasOverride: !!(ev.overrides && ev.overrides[dateStr])
           });
@@ -1086,6 +1200,7 @@
           instanceDate: dateStr,
           title: ev.title, start: ev.start, end: ev.end,
           notes: ev.notes, participants: ev.participants,
+          creatorId: creatorId,
           isRecurring: false, hasOverride: false
         });
       }
@@ -1233,6 +1348,92 @@
   const dateDisplayBtn = document.getElementById('dateDisplayBtn');
   const dateContentCurrent = document.getElementById('dateContentCurrent');
 
+  /* ---------------- 選取模式（批次刪除行程／使用者欄位） ----------------
+     權限規則：
+     - 使用者欄位：只有自己的欄位（CURRENT_USER_ID）可以選取／刪除，
+       且僅剩一位使用者時不可刪除（canSelectColumn 直接擋掉，不給選）。
+     - 行程：自己創建的行程（無論是否為共同行程）都可以選取／刪除；
+       不是自己創建、但只單獨掛在自己欄位上的行程，也視為「自己欄位上的
+       行程」可以選取／刪除；不是自己創建、且是跟別人共同參與的行程，
+       則不能選取／刪除（只有創建者本人可以）。 */
+  let selectMode = false;
+  let selectedEventKeys = new Set();   // 'masterId@instanceDate'
+  let selectedColumnIds = new Set();
+
+  function canSelectColumn(col){
+    if(col.id !== CURRENT_USER_ID) return false;
+    if(columns.length <= 1) return false; // 僅剩一位使用者，不可刪除
+    return true;
+  }
+
+  function canSelectInstance(inst){
+    const creatorId = inst.creatorId || CURRENT_USER_ID;
+    if(creatorId === CURRENT_USER_ID) return true; // 自己創建的，一定可以
+    // 不是自己創建：只有「單獨掛在自己欄位上」的行程才可以選取
+    return !!(inst.participants && inst.participants.length === 1 && inst.participants[0] === CURRENT_USER_ID);
+  }
+
+  const phoneEl = document.getElementById('phone');
+  const selectToggleBtn = document.getElementById('btnSelectToggle');
+  const selectToggleIcon = document.getElementById('selectToggleIcon');
+  const deleteSelectedBtn = document.getElementById('btnDeleteSelected');
+
+  function setSelectMode(on){
+    selectMode = on;
+    selectedEventKeys.clear();
+    selectedColumnIds.clear();
+    selectToggleBtn.classList.toggle('active', on);
+    selectToggleBtn.setAttribute('aria-label', on ? '取消選取' : '選取');
+    selectToggleIcon.textContent = on ? '×' : '選取';
+    deleteSelectedBtn.hidden = !on;
+    phoneEl.classList.toggle('select-mode-active', on);
+    renderColumnHeader();
+    renderEvents();
+  }
+
+  selectToggleBtn.addEventListener('click', function(){
+    setSelectMode(!selectMode);
+  });
+
+  deleteSelectedBtn.addEventListener('click', function(){
+    if(selectedEventKeys.size === 0 && selectedColumnIds.size === 0) return;
+
+    // 1) 刪除被選取的行程：只刪除「目前這一天」看到的這一場，
+    //    重複行程的其他日期不受影響（跟單一編輯頁「不同步」刪除的規則一致）。
+    selectedEventKeys.forEach(key => {
+      const at = key.lastIndexOf('@');
+      const masterId = key.slice(0, at);
+      const instanceDate = key.slice(at+1);
+      const master = events.find(e => e.id === masterId);
+      if(!master) return;
+      if(!master.recurrence){
+        events = events.filter(e => e !== master);
+      } else {
+        master.excluded = master.excluded || [];
+        if(master.excluded.indexOf(instanceDate) === -1) master.excluded.push(instanceDate);
+        if(master.overrides) delete master.overrides[instanceDate];
+      }
+    });
+
+    // 2) 刪除被選取的使用者欄位：從所有行程的參與者名單中移除該欄位，
+    //    行程若因此變成沒有任何參與者，代表整段都只掛在被刪除的人身上，一併刪除。
+    if(selectedColumnIds.size){
+      columns = columns.filter(c => !selectedColumnIds.has(c.id));
+      events = events.filter(ev => {
+        ev.participants = (ev.participants||[]).filter(pid => !selectedColumnIds.has(pid));
+        if(ev.overrides){
+          Object.keys(ev.overrides).forEach(d => {
+            const ov = ev.overrides[d];
+            if(ov.participants) ov.participants = ov.participants.filter(pid => !selectedColumnIds.has(pid));
+          });
+        }
+        return ev.participants.length > 0;
+      });
+    }
+
+    setSelectMode(false); // 刪除完成後自動關閉選取狀態
+  });
+
   function renderColumnHeader(){
     columnHeaderRow.innerHTML = '';
     columns.forEach((col, idx) => {
@@ -1240,12 +1441,40 @@
       cell.className = 'col-head col-' + colByIndex(idx);
       cell.innerHTML = '<span class="col-dot"></span><span class="col-name"></span>';
       cell.querySelector('.col-name').textContent = col.name;
+
+      if(selectMode){
+        const pickable = canSelectColumn(col);
+        if(pickable){
+          cell.classList.add('select-pickable');
+          if(selectedColumnIds.has(col.id)) cell.classList.add('select-picked');
+          cell.addEventListener('click', function(){
+            if(selectedColumnIds.has(col.id)) selectedColumnIds.delete(col.id);
+            else selectedColumnIds.add(col.id);
+            renderColumnHeader();
+            renderColumnDividers();
+          });
+        } else {
+          cell.classList.add('select-locked');
+        }
+      }
+
       columnHeaderRow.appendChild(cell);
     });
   }
 
   function renderColumnDividers(){
     colDividers.innerHTML = '';
+    const n = Math.max(1, columns.length);
+    if(selectMode && selectedColumnIds.size){
+      columns.forEach((col, idx) => {
+        if(!selectedColumnIds.has(col.id)) return;
+        const band = document.createElement('div');
+        band.className = 'col-select-band';
+        band.style.left = (idx/n*100)+'%';
+        band.style.width = (1/n*100)+'%';
+        colDividers.appendChild(band);
+      });
+    }
     for(let i=1; i<columns.length; i++){
       const line = document.createElement('div');
       line.className = 'col-div-line';
@@ -1299,7 +1528,7 @@
     if(insts.length === 0){
       const hint = document.createElement('div');
       hint.className = 'hint-empty';
-      hint.textContent = '此日尚無行程 · 長按空白格拖曳選取，或按右上角「＋新增」';
+      hint.textContent = '本日尚未安排行程';
       eventsLayer.appendChild(hint);
       return;
     }
@@ -1334,6 +1563,16 @@
         card.dataset.masterId = inst.masterId;
         card.dataset.date = inst.instanceDate;
 
+        if(selectMode){
+          card.classList.add('select-mode');
+          if(canSelectInstance(inst)){
+            const key = inst.masterId+'@'+inst.instanceDate;
+            if(selectedEventKeys.has(key)) card.classList.add('select-picked');
+          } else {
+            card.classList.add('select-locked');
+          }
+        }
+
         if(durationMin < 15){
           // 連一行都放不下：整段文字用同一個節點，稍後統一縮字塞進去
           card.classList.add('tiny');
@@ -1359,7 +1598,7 @@
         handle.className = 'resize-handle';
         handle.setAttribute('aria-hidden', 'true');
         card.appendChild(handle);
-        attachResizeHandle(card, inst, handle, runMin, runMax);
+        attachResizeHandle(card, inst, handle, runMin, runMax, {title:title, recurMark:recurMark, names:names});
         eventsLayer.appendChild(card);
         if(durationMin < 15) fitTinyCardText(card);
       });
@@ -1383,6 +1622,25 @@
 
   function escapeHtml(s){
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // 拖曳圓點調整時長時，即時把卡片上顯示的時間文字換成拖曳當下（吸附到
+  // 5 分鐘後）的預覽值，讓使用者可以直接看數字決定在哪裡放手，
+  // 不用再靠肉眼對齊格線。三種卡片版型（tiny／compact／一般）的時間
+  // 文字各自長在不同節點裡，這裡依卡片目前的 class 分別找到對應節點更新。
+  function updateCardTimeDisplay(card, meta, timeStr){
+    const soloEl = card.querySelector('.ecard-solo');
+    if(soloEl){
+      soloEl.innerHTML = meta.recurMark + meta.title + ' · ' + timeStr;
+      return;
+    }
+    const timeEl = card.querySelector('.ecard-time');
+    if(!timeEl) return;
+    if(card.classList.contains('compact')){
+      timeEl.textContent = timeStr;
+    } else {
+      timeEl.textContent = timeStr + (meta.names ? ' · '+meta.names : '');
+    }
   }
 
   function renderTimeline(){
@@ -1734,7 +1992,7 @@
 
     const gridRect = timelineGrid.getBoundingClientRect();
     const rawMin = Math.round((ghostTop - gridRect.top)/50*60);
-    const snappedStart = Math.max(0, Math.min(23*60, Math.round(rawMin/15)*15));
+    const snappedStart = Math.max(0, Math.min(23*60, Math.round(rawMin/5)*5));
     const newStart = minutesToTime(snappedStart);
     const newEnd = minutesToTime(snappedStart + fd.durationMin);
 
@@ -1777,6 +2035,19 @@
 
     card.addEventListener('pointerdown', function(e){
       e.stopPropagation();
+
+      if(selectMode){
+        // 選取狀態下，點擊行程只用來勾選/取消勾選，不進入原本的長按選單／
+        // 拖曳搬移／開編輯頁那套互動。沒有權限的行程（別人創建的共同行程）
+        // 直接忽略點擊。
+        if(!canSelectInstance(inst)) return;
+        const key = inst.masterId+'@'+inst.instanceDate;
+        if(selectedEventKeys.has(key)) selectedEventKeys.delete(key);
+        else selectedEventKeys.add(key);
+        renderEvents();
+        return;
+      }
+
       stopMomentumScroll(); // 再次觸碰畫面就先停掉還在滑的慣性捲動
       startX = e.clientX;
       startY = e.clientY;
@@ -1860,7 +2131,7 @@
 
   // 長按卡片右下角的圓點並拖曳：可以同時調整區塊的「長」（時長，下緣）與
   // 「寬」（參與者範圍，右緣）。起始時間與起始欄位（左上角）固定不動。
-  function attachResizeHandle(card, inst, handle, runMin, runMax){
+  function attachResizeHandle(card, inst, handle, runMin, runMax, meta){
     let longPressTimer = null;
     let resizing = false;
     let startX = 0, startY = 0;
@@ -1947,6 +2218,14 @@
         card.style.height = newHeight + 'px';
         finalWidthPx = newWidthPx;
         card.style.width = newWidthPx + 'px';
+
+        // 即時預覽：用跟放開時完全相同的 5 分鐘吸附規則換算目前的結束時間，
+        // 直接寫回卡片上的時間文字，這樣使用者放手時看到的數字
+        // 就是最終會套用的結果，不會有落差。
+        const startMinAbs = Math.round(origTop/50*60);
+        const previewDurationMin = Math.max(5, Math.round(newHeight/50*60/5)*5);
+        const previewEndMin = startMinAbs + previewDurationMin;
+        updateCardTimeDisplay(card, meta, minutesToTime(startMinAbs)+' - '+minutesToTime(previewEndMin));
       };
 
       const onUp = function(e2){
@@ -1959,9 +2238,9 @@
           card.classList.remove('resizing');
           handle.classList.remove('active');
 
-          // 高度 → 吸附到 15 分鐘
-          let durationMin = Math.round(finalHeight/50*60/15)*15;
-          durationMin = Math.max(15, durationMin);
+          // 高度 → 吸附到 5 分鐘
+          let durationMin = Math.round(finalHeight/50*60/5)*5;
+          durationMin = Math.max(5, durationMin);
           const startMinAbs = Math.round(origTop/50*60);
           const newStart = minutesToTime(startMinAbs);
           const newEnd = minutesToTime(startMinAbs + durationMin);
@@ -2030,7 +2309,8 @@
     momentumRAF = requestAnimationFrame(step);
   }
 
-  function snap25(px){ return Math.round(px/12.5)*12.5; } // 12.5px = 15分鐘（50px/小時 ÷ 4）
+  function snapToFiveMin(px){ return Math.round(px/(50/12))*(50/12); } // 50/12px ≈ 4.17px = 5分鐘（50px/小時 ÷ 12），格線視覺上仍只畫到15分刻度，只是拖曳吸附變細
+  const FIVE_MIN_PX = 50/12; // 5 分鐘對應的像素高度，供各處拖曳/縮放/建立行程的最小單位統一使用
 
   // 讓拉框選取的範圍不能延伸進已經被其他行程占用的地方：anchorPx/anchorColIdx
   // 是拖曳的固定端（手指最初按下的位置），只有「正在延伸」的那一端會被
@@ -2101,7 +2381,7 @@
     box.style.height = Math.max(6, trueHeight)+'px'; // 視覺上留一點高度看得到,但不代表可以建立
     box.style.left = 'calc(' + (colMin/n*100) + '% + 2px)';
     box.style.width = 'calc(' + ((colMax-colMin+1)/n*100) + '% - 4px)';
-    box.classList.toggle('no-room', trueHeight < 12.5);
+    box.classList.toggle('no-room', trueHeight < FIVE_MIN_PX);
     // 直接記錄實際欄位索引跟「真實」高度，放開時讀這裡即可，不要從
     // calc() 字串或被強制拉高的 style.height 反推。
     box.dataset.colMin = colMin;
@@ -2111,7 +2391,7 @@
     const startMin = Math.round(topPx/50*60);
     const endMin = Math.round(bottomPx/50*60);
     const names = columns.slice(colMin, colMax+1).map(c=>c.name).join('、');
-    box.querySelector('.selection-label').textContent = trueHeight < 12.5
+    box.querySelector('.selection-label').textContent = trueHeight < FIVE_MIN_PX
       ? '沒有空間'
       : minutesToTime(startMin) + ' – ' + minutesToTime(endMin) + (names ? ' · '+names : '');
   }
@@ -2165,9 +2445,9 @@
       e.preventDefault();
       let top = Math.min(anchorPx, curPx);
       let bottom = Math.max(anchorPx, curPx);
-      top = Math.max(0, snap25(top));
-      bottom = Math.min(1200, snap25(bottom));
-      if(bottom - top < 12.5) bottom = top + 12.5;
+      top = Math.max(0, snapToFiveMin(top));
+      bottom = Math.min(1200, snapToFiveMin(bottom));
+      if(bottom - top < FIVE_MIN_PX) bottom = top + FIVE_MIN_PX;
 
       const curColIdx = colIdxFromX(e.clientX);
       const colMin = Math.min(anchorColIdx, curColIdx);
@@ -2192,7 +2472,7 @@
         const colMin = Number(box.dataset.colMin);
         const colMax = Number(box.dataset.colMax);
         removeSelectionBox();
-        if(bottom - top >= 12.5){ // 被夾到沒有空間時這裡會趨近 0，不建立行程
+        if(bottom - top >= FIVE_MIN_PX){ // 被夾到沒有空間時這裡會趨近 0，不建立行程
           const startMin = Math.round(top/50*60);
           const endMin = Math.round(bottom/50*60);
           const participantIds = columns.slice(colMin, colMax+1).map(c=>c.id);
@@ -2210,6 +2490,7 @@
     }
 
     timelineGrid.addEventListener('pointerdown', function(e){
+      if(selectMode) return; // 選取狀態下，空白處長按不建立新行程，避免手勢衝突
       // 只處理空白區域（行程卡自己的 pointerdown 會 stopPropagation）
       stopMomentumScroll(); // 再次觸碰畫面就先停掉還在滑的慣性捲動
       downY = e.clientY;
@@ -2228,7 +2509,7 @@
         if(cancelled) return;
         selecting = true;
         if(navigator.vibrate) navigator.vibrate(15);
-        let top = Math.max(0, snap25(anchorPx));
+        let top = Math.max(0, snapToFiveMin(anchorPx));
         let bottom = Math.min(1200, top + 50); // 預設長按不拖曳＝1小時
         const clamped = clampSelectionAgainstCollisions(top, bottom, anchorColIdx, anchorColIdx, true, true);
         paintSelectionBox(clamped.top, clamped.bottom, clamped.colMin, clamped.colMax);
@@ -2241,8 +2522,8 @@
   })();
 
   function createNewEvent(startMin, endMin, participantIds){
-    startMin = Math.max(0, Math.min(23*60+45, startMin));
-    endMin = Math.max(startMin+15, Math.min(24*60, endMin));
+    startMin = Math.max(0, Math.min(23*60+55, startMin));
+    endMin = Math.max(startMin+5, Math.min(24*60, endMin));
     if(!participantIds || participantIds.length===0) participantIds = [columns[0].id];
     const id = 'e' + Date.now();
     const ev = {
@@ -2253,19 +2534,24 @@
       end: minutesToTime(endMin),
       notes: '',
       participants: participantIds.slice(),
+      creatorId: CURRENT_USER_ID,
       recurrence: null
     };
     events.push(ev);
     renderEvents();
+    return id;
   }
 
   document.getElementById('fabAdd').addEventListener('click', function(){
+    if(selectMode) return;
     const now = new Date();
     const startHour = currentDate === todayStr() ? now.getHours() : 9;
-    createNewEvent(startHour*60, startHour*60 + 60, [columns[0].id]);
+    const newId = createNewEvent(startHour*60, startHour*60 + 60, [columns[0].id]);
+    openEdit(newId, currentDate);
   });
 
   document.getElementById('btnAddColumn').addEventListener('click', function(){
+    if(selectMode) return;
     const name = (window.prompt('新增共編使用者的名字：', '') || '').trim();
     if(!name) return;
     const id = 'p' + Date.now();
@@ -2527,8 +2813,24 @@
   }
   buildHourRows();
   renderTimeline();
-  // 開場自動捲到 08:00 附近
-  timelineScroll.scrollTop = 7*50;
+  // 開場自動捲到「現在時間線」的位置，讓那條線落在可視範圍由上往下 1/3
+  // 的地方；如果現在時間太晚，往下捲會超過畫面底部，夾限會自動讓它
+  // 停在捲動範圍的最底端，不會硬要維持在 1/3 處造成過捲。
+  function scrollToNowLine(){
+    if(currentDate !== todayStr()){
+      timelineScroll.scrollTop = 7*50; // 不是今天就沒有「現在時間線」，退回原本的預設位置
+      return;
+    }
+    const now = new Date();
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    const nowTopPx = nowMin/60*50;
+    const visibleHeight = timelineScroll.clientHeight;
+    let target = nowTopPx - visibleHeight/3;
+    const maxScroll = Math.max(0, timelineScroll.scrollHeight - timelineScroll.clientHeight);
+    target = Math.max(0, Math.min(maxScroll, target));
+    timelineScroll.scrollTop = target;
+  }
+  scrollToNowLine();
 
   // 每分鐘更新一次「現在時間」紅線
   setInterval(renderNowLine, 60*1000);
