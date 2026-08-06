@@ -1934,6 +1934,16 @@
       grabOffsetY: grabY - rect.top,
       span: runMax - runMin,
       durationMin: timeToMinutes(inst.end) - timeToMinutes(inst.start),
+      // 記錄下標題／重複標記／參與者名單，拖曳過程中即時換算時間文字時
+      // 要用同一套格式重建卡片內容（跟 attachResizeHandle 共用同一個
+      // updateCardTimeDisplay 輔助函式）。
+      meta: {
+        title: escapeHtml(inst.title || '(未命名行程)'),
+        recurMark: inst.isRecurring ? '<span class="ecard-recur-inline">↻</span>' : '',
+        names: (inst.participants||[])
+          .map(pid => { const c = columns.find(x=>x.id===pid); return c ? c.name : null; })
+          .filter(Boolean).join('、')
+      },
       lastEdgeDir: null
     };
     positionGhost(curX, curY);
@@ -1943,6 +1953,16 @@
   function updateFloatingDrag(clientX, clientY){
     if(!floatingDrag) return;
     positionGhost(clientX, clientY);
+
+    // 即時預覽：用跟放開時（endFloatingDrag）完全相同的 5 分鐘吸附規則，
+    // 讓浮動卡片上顯示的時間即時反映「現在放開的話會變成幾點」，
+    // 使用者可以直接看數字決定要在哪裡鬆手，不用肉眼對齊格線。
+    const ghostTop = clientY - floatingDrag.grabOffsetY;
+    const gridRect = timelineGrid.getBoundingClientRect();
+    const rawMin = Math.round((ghostTop - gridRect.top)/50*60);
+    const snappedStart = Math.max(0, Math.min(23*60, Math.round(rawMin/5)*5));
+    const previewStr = minutesToTime(snappedStart)+' - '+minutesToTime(snappedStart + floatingDrag.durationMin);
+    updateCardTimeDisplay(floatingDrag.ghost, floatingDrag.meta, previewStr);
 
     const rect = eventsLayer.getBoundingClientRect();
     const nearLeft = clientX - rect.left < 34;
