@@ -900,7 +900,13 @@
   ::-webkit-scrollbar{width:0;height:0;}
 
   /* ---------------- 操作教學疊層 ---------------- */
-  .tutorial-overlay{position:fixed; inset:0; z-index:9990;}
+  /* 最外層容器本身雖然透明看不見，但預設 pointer-events 是 auto，
+     如果不特別關掉，它自己就會把整個螢幕的點擊吃光——包括高亮框裡
+     那個「特意留空給使用者操作」的洞，導致整區看起來亮著卻點不動。
+     這裡把容器本身設成 pointer-events:none（點擊直接穿透到底下真正
+     的畫面元件），只有真的需要擋住點擊的兩塊子元素（遮罩、說明泡泡）
+     各自重新打開 pointer-events:auto。 */
+  .tutorial-overlay{position:fixed; inset:0; z-index:9990; pointer-events:none;}
   .tutorial-overlay[hidden]{display:none;}
   .tutorial-mask{
     position:fixed;
@@ -918,6 +924,7 @@
   }
   .tutorial-bubble{
     position:fixed;
+    pointer-events:auto;
     z-index:9993;
     background:var(--ink);
     color:var(--paper);
